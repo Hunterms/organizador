@@ -24,7 +24,11 @@ function parseICalDate(value) {
     const date = isUTC
       ? new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`)
       : new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`);
-    const dateStr = date.toISOString().split('T')[0];
+    // Use local date parts — toISOString() would flip the day near midnight UTC.
+    const ly = date.getFullYear();
+    const lm = String(date.getMonth() + 1).padStart(2, '0');
+    const ld = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${ly}-${lm}-${ld}`;
     const timeStr = date.toTimeString().slice(0, 5);
     return { date: dateStr, time: timeStr, allDay: false };
   }
