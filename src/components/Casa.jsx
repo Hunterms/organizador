@@ -90,19 +90,19 @@ export default function Casa({ state, updateState, userId }) {
   };
 
   const toggleDay = (roomKey, dayIdx) => {
-    let nextDays = null;
-    updateState(prev => {
-      const current = prev.homeRoutine[roomKey]?.days || [];
-      nextDays = current.includes(dayIdx)
-        ? current.filter(d => d !== dayIdx)
-        : [...current, dayIdx].sort();
-      return {
-        ...prev,
-        homeRoutine: { ...prev.homeRoutine, [roomKey]: { ...prev.homeRoutine[roomKey], days: nextDays } },
-      };
-    });
+    // Compute next days synchronously, outside the setState updater. Capturing
+    // via side-effect inside the updater is unreliable under StrictMode —
+    // the outer variable can stay null when the Supabase upsert fires.
+    const current = state.homeRoutine[roomKey]?.days || [];
+    const nextDays = current.includes(dayIdx)
+      ? current.filter(d => d !== dayIdx)
+      : [...current, dayIdx].sort();
+    updateState(prev => ({
+      ...prev,
+      homeRoutine: { ...prev.homeRoutine, [roomKey]: { ...prev.homeRoutine[roomKey], days: nextDays } },
+    }));
     // Persist — upsert on (user_id, room_key)
-    if (userId && nextDays) {
+    if (userId) {
       updateHomeRoutineDb(userId, roomKey, nextDays).catch(e => console.error('routine sync failed:', e));
     }
   };

@@ -209,16 +209,20 @@ export default function Estudos({ state, updateState, userId }) {
   const isTmp = (id) => typeof id === 'string' && id.startsWith('tmp-');
 
   const cycleStatus = (sid, topicId) => {
-    let nextStatus = null;
+    // Compute the next status synchronously BEFORE dispatching the updater.
+    // Closure-capture inside a setState updater is unreliable under
+    // StrictMode / concurrent rendering — the updater can run twice (or be
+    // deferred), leaving the closure variable stale or null when we fire the
+    // follow-up Supabase PATCH.
+    const subj = state.subjects.find(s => s.id === sid);
+    const topic = subj?.topics.find(t => t.id === topicId);
+    if (!topic) return;
+    const nextStatus = statusConfig[topic.status].next;
     updateState(p => ({ ...p, subjects: p.subjects.map(s => {
       if (s.id !== sid) return s;
-      return { ...s, topics: s.topics.map(t => {
-        if (t.id !== topicId) return t;
-        nextStatus = statusConfig[t.status].next;
-        return { ...t, status: nextStatus };
-      }) };
+      return { ...s, topics: s.topics.map(t => t.id === topicId ? { ...t, status: nextStatus } : t) };
     }) }));
-    if (isTmp(topicId) || !nextStatus) return;
+    if (isTmp(topicId)) return;
     updateTopicDb(topicId, { status: nextStatus }).catch(e => console.error('cycleStatus sync failed:', e));
   };
 
