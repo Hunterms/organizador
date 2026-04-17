@@ -75,12 +75,15 @@ export default function Hoje({ state, updateState, onAddTask }) {
   // we log to console but keep the optimistic state — simpler UX than rolling
   // back. Skipping 'tmp-' ids (tasks still in-flight from add).
   const toggleTask = (id) => {
-    let nextDone = null;
-    updateState(p => ({ ...p, tasks: p.tasks.map(t => {
-      if (t.id !== id) return t;
-      nextDone = !t.done;
-      return { ...t, done: nextDone };
-    }) }));
+    // Compute the next value SYNCHRONOUSLY from the current state before
+    // dispatching the setState updater. Capturing it via side-effect inside
+    // the updater is unsafe — React may call the updater more than once
+    // (StrictMode) or defer it, leaving `nextDone` as null when the PATCH
+    // fires, which violates the NOT NULL constraint on `done`.
+    const current = state.tasks.find(t => t.id === id);
+    if (!current) return;
+    const nextDone = !current.done;
+    updateState(p => ({ ...p, tasks: p.tasks.map(t => t.id === id ? { ...t, done: nextDone } : t) }));
     if (typeof id === 'string' && id.startsWith('tmp-')) return;
     updateTaskDb(id, { done: nextDone }).catch(e => console.error('toggleTask sync failed:', e));
   };
