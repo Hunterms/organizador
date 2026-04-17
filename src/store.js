@@ -281,6 +281,14 @@ export async function deleteExam(examId) {
   if (error) throw error;
 }
 
+export async function updateExam(examId, updates) {
+  const dbUpdates = {};
+  if ('name' in updates) dbUpdates.name = updates.name;
+  if ('date' in updates) dbUpdates.date = updates.date;
+  const { error } = await supabase.from('exams').update(dbUpdates).eq('id', examId);
+  if (error) throw error;
+}
+
 // Study sessions
 export async function createStudySession(userId, session) {
   const { data, error } = await supabase.from('study_sessions').insert({

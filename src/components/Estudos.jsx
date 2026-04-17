@@ -4,13 +4,13 @@ import {
   AlertTriangle, Clock, Upload, FileUp, Loader2, Lightbulb,
   FlaskConical, Code2, Puzzle, PenLine, Ruler, Repeat, Rocket, Zap,
   Target, CheckCircle2, Timer, ClipboardCheck, Video, Link2,
-  Brain, Shuffle, Flame,
+  Brain, Shuffle, Flame, Pencil, Check, Trash2,
 } from 'lucide-react';
 import {
   parseSyllabus, generateReviewSchedule, getSubjectStudyStats, getDateKey,
-  createSubject as createSubjectDb, deleteSubject as deleteSubjectDb, dismissSubject as dismissSubjectDb,
+  createSubject as createSubjectDb, updateSubject as updateSubjectDb, deleteSubject as deleteSubjectDb, dismissSubject as dismissSubjectDb,
   createTopic as createTopicDb, updateTopic as updateTopicDb, deleteTopic as deleteTopicDb,
-  createExam as createExamDb,
+  createExam as createExamDb, updateExam as updateExamDb, deleteExam as deleteExamDb,
 } from '../store';
 import {
   getTodayReviewQueue, generateInterleavedSession,
@@ -112,6 +112,11 @@ export default function Estudos({ state, updateState, userId }) {
   const [showAddExam, setShowAddExam] = useState(null);
   const [newSubject, setNewSubject] = useState({ name: '', code: '' });
   const [newTopic, setNewTopic] = useState('');
+  // Inline editing state: exam being edited + draft values; subject rename mode
+  const [editingExamId, setEditingExamId] = useState(null);
+  const [examDraft, setExamDraft] = useState({ name: '', date: '' });
+  const [editingSubjectId, setEditingSubjectId] = useState(null);
+  const [subjectNameDraft, setSubjectNameDraft] = useState('');
   const [newExam, setNewExam] = useState({ name: '', date: '' });
   const [syllabusText, setSyllabusText] = useState('');
   const [loadingPdf, setLoadingPdf] = useState(false);
@@ -329,6 +334,35 @@ export default function Estudos({ state, updateState, userId }) {
     if (isTmp(sid)) return;
     const op = isImport ? dismissSubjectDb(sid) : deleteSubjectDb(sid);
     op.catch(e => console.error(isImport ? 'dismissSubject sync failed:' : 'deleteSubject sync failed:', e));
+  };
+
+  // Rename subject (e.g. when Classroom imported a weird name or you want to
+  // shorten it). Subject id stays the same — only the display name changes.
+  const renameSubject = (sid, name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id === sid ? { ...s, name: trimmed } : s) }));
+    if (isTmp(sid)) return;
+    updateSubjectDb(sid, { name: trimmed }).catch(e => console.error('renameSubject sync failed:', e));
+  };
+
+  // Update exam (name and/or date). Used by the inline edit form on each
+  // exam card — the PDF parser sometimes pulls a shortened/wrong label
+  // ("Exame .") and dates of recurring events need manual correction.
+  const updateExamLocal = (sid, examId, patch) => {
+    updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id !== sid ? s : {
+      ...s, exams: s.exams.map(e => e.id === examId ? { ...e, ...patch } : e),
+    }) }));
+    if (isTmp(examId)) return;
+    updateExamDb(examId, patch).catch(e => console.error('updateExam sync failed:', e));
+  };
+
+  const deleteExamLocal = (sid, examId) => {
+    updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id !== sid ? s : {
+      ...s, exams: s.exams.filter(e => e.id !== examId),
+    }) }));
+    if (isTmp(examId)) return;
+    deleteExamDb(examId).catch(e => console.error('deleteExam sync failed:', e));
   };
 
   return (
@@ -550,26 +584,75 @@ export default function Estudos({ state, updateState, userId }) {
                     const d = Math.ceil((new Date(exam.date) - new Date()) / 86400000);
                     const reviews = generateReviewSchedule(exam.date);
                     const u = urgencyMeta(d);
+                    const isEditing = editingExamId === exam.id;
                     return (
-                      <div key={i} className="card-inner mb-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[13px] text-white font-medium">{exam.name}</span>
-                          <span className={`text-xs font-bold shrink-0 inline-flex items-center gap-1 ${u.cls}`}>
-                            <u.Icon size={11} aria-hidden="true" />
-                            {new Date(exam.date).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} ({d}d)
-                            <span className="sr-only"> — {u.label}</span>
-                          </span>
-                        </div>
-                        {reviews.length > 0 && (
-                          <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                            <span className="text-[10px] text-zinc-600">Revisoes:</span>
-                            {reviews.map((r, j) => {
-                              const today = r === getDateKey();
-                              return <span key={j} className={`text-[10px] px-2 py-0.5 rounded-md ${today ? 'bg-violet-500/25 text-violet-300 font-bold' : 'bg-zinc-800/60 text-zinc-600'}`}>
-                                {new Date(r+'T12:00').toLocaleDateString('pt-BR', { day:'numeric', month:'short' })}
-                              </span>;
-                            })}
+                      <div key={exam.id ?? i} className="card-inner mb-2">
+                        {isEditing ? (
+                          <div className="space-y-2 animate-in">
+                            <input autoComplete="off" placeholder="Nome da prova"
+                              value={examDraft.name}
+                              onChange={e => setExamDraft(p => ({ ...p, name: e.target.value }))}
+                              className="input-base text-[13px]" autoFocus />
+                            <div className="flex gap-2">
+                              <input type="date" value={examDraft.date}
+                                onChange={e => setExamDraft(p => ({ ...p, date: e.target.value }))}
+                                className="input-base text-[13px] flex-1" />
+                              <button onClick={() => {
+                                if (!examDraft.name.trim() || !examDraft.date) return;
+                                updateExamLocal(subject.id, exam.id, { name: examDraft.name.trim(), date: examDraft.date });
+                                setEditingExamId(null);
+                              }}
+                                aria-label="Salvar alteracoes"
+                                className="bg-violet-500 hover:bg-violet-400 text-white px-4 rounded-xl text-xs min-h-[44px] flex items-center gap-1.5">
+                                <Check size={13} aria-hidden="true" /> Salvar
+                              </button>
+                              <button onClick={() => setEditingExamId(null)}
+                                aria-label="Cancelar edicao"
+                                className="bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 px-3 rounded-xl text-xs min-h-[44px]">
+                                Cancelar
+                              </button>
+                            </div>
                           </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[13px] text-white font-medium flex-1 min-w-0 break-words">{exam.name}</span>
+                              <span className={`text-xs font-bold shrink-0 inline-flex items-center gap-1 ${u.cls}`}>
+                                <u.Icon size={11} aria-hidden="true" />
+                                {new Date(exam.date + 'T12:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} ({d}d)
+                                <span className="sr-only"> — {u.label}</span>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 mt-1 -mb-1">
+                              <button onClick={() => {
+                                setEditingExamId(exam.id);
+                                setExamDraft({ name: exam.name, date: exam.date });
+                              }}
+                                aria-label={`Editar ${exam.name}`}
+                                className="text-zinc-600 hover:text-violet-400 transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center">
+                                <Pencil size={11} aria-hidden="true" />
+                              </button>
+                              <button onClick={() => {
+                                if (!confirm(`Remover prova "${exam.name}"?`)) return;
+                                deleteExamLocal(subject.id, exam.id);
+                              }}
+                                aria-label={`Remover ${exam.name}`}
+                                className="text-zinc-600 hover:text-red-400 transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center">
+                                <Trash2 size={11} aria-hidden="true" />
+                              </button>
+                            </div>
+                            {reviews.length > 0 && (
+                              <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                                <span className="text-[10px] text-zinc-600">Revisoes:</span>
+                                {reviews.map((r, j) => {
+                                  const today = r === getDateKey();
+                                  return <span key={j} className={`text-[10px] px-2 py-0.5 rounded-md ${today ? 'bg-violet-500/25 text-violet-300 font-bold' : 'bg-zinc-800/60 text-zinc-600'}`}>
+                                    {new Date(r+'T12:00').toLocaleDateString('pt-BR', { day:'numeric', month:'short' })}
+                                  </span>;
+                                })}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     );
@@ -649,8 +732,45 @@ export default function Estudos({ state, updateState, userId }) {
                   </div>
                 )}
 
-                <button onClick={() => deleteSubject(subject.id)}
-                  className="text-[11px] text-red-500/40 hover:text-red-400 transition-colors min-h-[36px] flex items-center">Remover materia</button>
+                {/* Rename + remove actions */}
+                {editingSubjectId === subject.id ? (
+                  <div className="flex gap-2 items-center">
+                    <input autoComplete="off" value={subjectNameDraft}
+                      onChange={e => setSubjectNameDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          renameSubject(subject.id, subjectNameDraft);
+                          setEditingSubjectId(null);
+                        } else if (e.key === 'Escape') {
+                          setEditingSubjectId(null);
+                        }
+                      }}
+                      className="input-base text-[13px] flex-1" autoFocus />
+                    <button onClick={() => {
+                      renameSubject(subject.id, subjectNameDraft);
+                      setEditingSubjectId(null);
+                    }}
+                      className="bg-violet-500 hover:bg-violet-400 text-white px-3 rounded-xl text-xs min-h-[40px] flex items-center gap-1.5">
+                      <Check size={13} aria-hidden="true" /> Salvar
+                    </button>
+                    <button onClick={() => setEditingSubjectId(null)}
+                      className="bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 px-3 rounded-xl text-xs min-h-[40px]">
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <button onClick={() => {
+                      setEditingSubjectId(subject.id);
+                      setSubjectNameDraft(subject.name);
+                    }}
+                      className="text-[11px] text-zinc-500 hover:text-violet-400 transition-colors min-h-[36px] flex items-center gap-1.5">
+                      <Pencil size={11} aria-hidden="true" /> Renomear materia
+                    </button>
+                    <button onClick={() => deleteSubject(subject.id)}
+                      className="text-[11px] text-red-500/40 hover:text-red-400 transition-colors min-h-[36px] flex items-center">Remover materia</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
