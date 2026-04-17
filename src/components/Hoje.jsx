@@ -3,15 +3,15 @@ import {
   getDateKey, getTodayReviews,
   updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb,
 } from '../store';
-import { Check, Clock, Sparkles, Trash2, ClipboardList, BookOpen, GripVertical } from 'lucide-react';
+import { Check, Clock, Sparkles, Trash2, ClipboardList, BookOpen, GripVertical, Pencil } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-const catBorder = { estudos: 'border-l-violet-500', trabalho: 'border-l-blue-500', terreiro: 'border-l-green-500', pessoal: 'border-l-amber-500', casa: 'border-l-pink-500' };
+const catBorder = { aula: 'border-l-cyan-500', estudos: 'border-l-violet-500', trabalho: 'border-l-blue-500', terreiro: 'border-l-green-500', pessoal: 'border-l-amber-500', casa: 'border-l-pink-500' };
 const effortLabel = { '5': '5m', '10': '10m', '30': '30m', '60': '1h', '120': '2h+' };
 
-function SortableTask({ task, onToggle, onDelete }) {
+function SortableTask({ task, onToggle, onDelete, onEdit }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : undefined };
 
@@ -39,6 +39,12 @@ function SortableTask({ task, onToggle, onDelete }) {
           <span className={`effort effort-${task.effort}`}>{effortLabel[task.effort] || '30m'}</span>
         </div>
       </div>
+      {onEdit && (
+        <button onClick={() => onEdit(task)} aria-label={`Editar ${task.title}`}
+          className="text-zinc-700 hover:text-indigo-400 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
+          <Pencil size={13} aria-hidden="true" />
+        </button>
+      )}
       <button onClick={() => onDelete(task.id)} aria-label={`Deletar ${task.title}`}
         className="text-zinc-700 hover:text-red-400 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
         <Trash2 size={14} aria-hidden="true" />
@@ -47,7 +53,7 @@ function SortableTask({ task, onToggle, onDelete }) {
   );
 }
 
-export default function Hoje({ state, updateState, onAddTask }) {
+export default function Hoje({ state, updateState, onAddTask, onEditTask }) {
   const today = getDateKey();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -93,7 +99,15 @@ export default function Hoje({ state, updateState, onAddTask }) {
     // next sync doesn't re-create them. Manual tasks get hard-deleted.
     const task = state.tasks.find(t => t.id === id);
     const isImport = task?.source && task.source !== 'manual';
-    updateState(p => ({ ...p, tasks: p.tasks.filter(t => t.id !== id) }));
+    // Cascade: if this task has a companion (e.g. the circular bus task
+    // points back at an aula via companion_task_id), delete it too so we
+    // don't leave an orphan reminder in the list.
+    const companion = state.tasks.find(t => t.companion_task_id === id);
+    const companionId = companion?.id;
+    updateState(p => ({ ...p, tasks: p.tasks.filter(t => t.id !== id && t.id !== companionId) }));
+    if (companionId && typeof companionId === 'string' && !companionId.startsWith('tmp-')) {
+      deleteTaskDb(companionId).catch(e => console.error('companion cleanup failed:', e));
+    }
     if (typeof id === 'string' && id.startsWith('tmp-')) return;
     const op = isImport ? dismissTaskDb(id) : deleteTaskDb(id);
     op.catch(e => console.error(isImport ? 'dismissTask sync failed:' : 'deleteTask sync failed:', e));
@@ -192,7 +206,7 @@ export default function Hoje({ state, updateState, onAddTask }) {
             <ul className="flex flex-col gap-2.5 list-none" aria-label="Lista de tarefas de hoje">
               {todayTasks.map(task => (
                 <li key={task.id}>
-                  <SortableTask task={task} onToggle={toggleTask} onDelete={deleteTask} />
+                  <SortableTask task={task} onToggle={toggleTask} onDelete={deleteTask} onEdit={onEditTask} />
                 </li>
               ))}
             </ul>

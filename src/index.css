@@ -37,8 +37,11 @@ body {
 .tag-terreiro { background: #22c55e12; color: #4ade80; }
 .tag-pessoal { background: #f59e0b12; color: #fbbf24; }
 .tag-casa { background: #ec489912; color: #f472b6; }
+.tag-aula { background: #06b6d412; color: #22d3ee; }
 
 .effort { display: inline-flex; align-items: center; white-space: nowrap; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+.effort-5 { background: #a3e63512; color: #bef264; }
+.effort-10 { background: #84cc1612; color: #a3e635; }
 .effort-30 { background: #06b6d40d; color: #22d3ee; }
 .effort-60 { background: #f59e0b0d; color: #fbbf24; }
 .effort-120 { background: #ef44440d; color: #f87171; }
@@ -60,7 +63,8 @@ body {
 .pill:not(.active) { opacity: 0.4; }
 .pill-estudos { color: #a78bfa; } .pill-trabalho { color: #60a5fa; }
 .pill-terreiro { color: #4ade80; } .pill-pessoal { color: #fbbf24; }
-.pill-casa { color: #f472b6; }
+.pill-casa { color: #f472b6; } .pill-aula { color: #22d3ee; }
+.pill-5 { color: #bef264; } .pill-10 { color: #a3e635; }
 .pill-30 { color: #22d3ee; } .pill-60 { color: #fbbf24; } .pill-120 { color: #f87171; }
 .pill-baixa { color: #4ade80; } .pill-media { color: #fbbf24; } .pill-alta { color: #f87171; }
 

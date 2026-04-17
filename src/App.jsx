@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { loadCache, saveCache, fetchAllData, createTask, defaultState, getDateKey } from './store';
+import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey } from './store';
+import { buildCircularTask } from './lib/circular';
 import { useAuth } from './lib/auth';
 import Login from './components/Login';
 import Hoje from './components/Hoje';
@@ -30,7 +31,7 @@ const tabs = [
   { id: 'ia', label: 'IA', icon: Brain },
 ];
 
-const categories = ['estudos', 'trabalho', 'terreiro', 'pessoal', 'casa'];
+const categories = ['aula', 'estudos', 'trabalho', 'terreiro', 'pessoal', 'casa'];
 const efforts = [
   { v: '5', l: '5m' },
   { v: '10', l: '10m' },
@@ -53,7 +54,13 @@ function OrganizadorApp() {
   const [activeTab, setActiveTab] = useState('hoje');
   const [state, setState] = useState(() => loadCache());
   const [showAddTask, setShowAddTask] = useState(false);
-  const [newTask, setNewTask] = useState({ title: '', category: 'pessoal', effort: '30', time: '' });
+  // editingId is null when adding a new task, or the existing task id when editing.
+  // generateCircular is surfaced only when category === 'aula' && time is set.
+  const [editingId, setEditingId] = useState(null);
+  const [newTask, setNewTask] = useState({
+    title: '', category: 'pessoal', effort: '30', time: '',
+    date: getDateKey(), generateCircular: true,
+  });
   const [showMenu, setShowMenu] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const gcal = useGoogleCalendar(user?.id, state);
@@ -86,29 +93,107 @@ function OrganizadorApp() {
     setState(prev => typeof updater === 'function' ? updater(prev) : { ...prev, ...updater });
   }, []);
 
-  const addTask = async () => {
-    if (!newTask.title.trim()) return;
-    const task = {
-      id: 'tmp-' + Date.now(),
-      title: newTask.title.trim(), category: newTask.category, effort: newTask.effort,
-      time: newTask.time, done: false, date: getDateKey(), recurring: false,
-    };
-    updateState(prev => ({ ...prev, tasks: [...prev.tasks, task] }));
-    setNewTask({ title: '', category: 'pessoal', effort: '30', time: '' });
-    setShowAddTask(false);
-    // Sync to Supabase
+  const resetTaskForm = () => {
+    setEditingId(null);
+    setNewTask({ title: '', category: 'pessoal', effort: '30', time: '', date: getDateKey(), generateCircular: true });
+  };
+
+  const openAddTask = () => {
+    resetTaskForm();
+    setShowAddTask(true);
+  };
+
+  // Called from Hoje when user taps the pencil. Prefill form with existing
+  // task so they can fix category / time / date / effort / title without
+  // deleting and re-adding. Imports (Classroom etc.) become editable too.
+  const openEditTask = (task) => {
+    setEditingId(task.id);
+    setNewTask({
+      title: task.title || '',
+      category: task.category || 'pessoal',
+      effort: task.effort || '30',
+      time: task.time || '',
+      date: task.date || getDateKey(),
+      generateCircular: false, // explicit opt-in on edit to avoid surprises
+    });
+    setShowAddTask(true);
+  };
+
+  // If the task qualifies (category=aula + time set), compute the "pegar
+  // circular" companion and insert it. Returns the saved companion id or null.
+  const maybeCreateCircular = async (parentTask) => {
+    if (parentTask.category !== 'aula' || !parentTask.time) return null;
+    const circular = buildCircularTask(parentTask);
+    if (!circular) return null;
+    const tmpId = 'tmp-circ-' + Date.now();
+    const companion = { ...circular, id: tmpId, companion_task_id: parentTask.id };
+    updateState(prev => ({ ...prev, tasks: [...prev.tasks, companion] }));
+    if (!user) return tmpId;
     try {
-      const saved = await createTask(user.id, task);
-      updateState(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === task.id ? { ...t, id: saved.id } : t) }));
+      const saved = await createTask(user.id, companion);
+      updateState(prev => ({
+        ...prev,
+        tasks: prev.tasks.map(t => t.id === tmpId ? { ...t, id: saved.id } : t),
+      }));
+      return saved.id;
     } catch (e) {
-      console.error('Sync failed:', e);
+      console.error('createCircular sync failed:', e);
+      return tmpId;
     }
+  };
+
+  const saveTask = async () => {
+    if (!newTask.title.trim()) return;
+    const payload = {
+      title: newTask.title.trim(),
+      category: newTask.category,
+      effort: newTask.effort,
+      time: newTask.time,
+      date: newTask.date || getDateKey(),
+    };
+    const shouldGenCircular = newTask.category === 'aula' && !!newTask.time && newTask.generateCircular;
+
+    if (editingId) {
+      // Edit existing task
+      updateState(prev => ({
+        ...prev,
+        tasks: prev.tasks.map(t => t.id === editingId ? { ...t, ...payload } : t),
+      }));
+      if (typeof editingId === 'string' && !editingId.startsWith('tmp-')) {
+        updateTaskDb(editingId, payload).catch(e => console.error('updateTask sync failed:', e));
+      }
+      if (shouldGenCircular) {
+        await maybeCreateCircular({ id: editingId, ...payload });
+      }
+    } else {
+      // Create new task
+      const tmpId = 'tmp-' + Date.now();
+      const task = { id: tmpId, ...payload, done: false, recurring: false };
+      updateState(prev => ({ ...prev, tasks: [...prev.tasks, task] }));
+      let realId = tmpId;
+      if (user) {
+        try {
+          const saved = await createTask(user.id, task);
+          realId = saved.id;
+          updateState(prev => ({
+            ...prev,
+            tasks: prev.tasks.map(t => t.id === tmpId ? { ...t, id: realId } : t),
+          }));
+        } catch (e) { console.error('createTask sync failed:', e); }
+      }
+      if (shouldGenCircular) {
+        await maybeCreateCircular({ id: realId, ...payload });
+      }
+    }
+
+    resetTaskForm();
+    setShowAddTask(false);
   };
 
   const renderTab = () => {
     const p = { state, updateState, userId: user?.id };
     switch (activeTab) {
-      case 'hoje': return <Hoje {...p} onAddTask={() => setShowAddTask(true)} />;
+      case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} />;
       case 'semana': return <Semana {...p} />;
       case 'estudos': return <Estudos {...p} />;
       case 'pomodoro': return <Pomodoro {...p} />;
@@ -135,7 +220,7 @@ function OrganizadorApp() {
             className="w-11 h-11 rounded-full bg-zinc-800/50 hover:bg-zinc-800 flex items-center justify-center transition-colors shrink-0">
             <span className="text-xs text-zinc-400 font-medium uppercase">{user?.email?.[0] || 'U'}</span>
           </button>
-          <button onClick={() => setShowAddTask(true)} aria-label="Adicionar tarefa"
+          <button onClick={openAddTask} aria-label="Adicionar tarefa"
             className="w-11 h-11 rounded-full bg-indigo-500 hover:bg-indigo-400 flex items-center justify-center transition-colors shrink-0">
             <Plus size={18} className="text-white" aria-hidden="true" />
           </button>
@@ -418,13 +503,14 @@ function OrganizadorApp() {
         </div>
       )}
 
-      {/* Add Task Modal */}
+      {/* Task Modal — also used for editing existing tasks */}
       {showAddTask && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
           onClick={e => e.target === e.currentTarget && setShowAddTask(false)}>
-          <div className="w-full sm:max-w-md bg-[#18181b] border-t sm:border border-zinc-800 rounded-t-3xl sm:rounded-2xl px-7 pt-8 pb-10 animate-in">
+          <div className="w-full sm:max-w-md bg-[#18181b] border-t sm:border border-zinc-800 rounded-t-3xl sm:rounded-2xl px-7 pt-8 pb-10 animate-in overflow-y-auto"
+            style={{ maxHeight: 'min(92vh, 820px)' }}>
             <div className="flex items-center justify-between mb-8">
-              <h3 className="text-base font-semibold text-white">Nova Tarefa</h3>
+              <h3 className="text-base font-semibold text-white">{editingId ? 'Editar Tarefa' : 'Nova Tarefa'}</h3>
               <button onClick={() => setShowAddTask(false)} aria-label="Fechar"
                 className="w-11 h-11 flex items-center justify-center text-zinc-500 hover:text-white rounded-xl transition-colors -mr-2">
                 <X size={20} />
@@ -437,13 +523,20 @@ function OrganizadorApp() {
                 <input id="task-title" type="text" placeholder="Titulo da tarefa" value={newTask.title}
                   autoComplete="off" autoCorrect="off" spellCheck="false"
                   onChange={e => setNewTask(p => ({ ...p, title: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && addTask()} autoFocus className="input-base" />
+                  onKeyDown={e => e.key === 'Enter' && saveTask()} autoFocus className="input-base" />
               </div>
 
-              <div>
-                <label htmlFor="task-time" className="text-xs text-zinc-500 mb-2 block">Horario (opcional)</label>
-                <input id="task-time" type="time" value={newTask.time}
-                  onChange={e => setNewTask(p => ({ ...p, time: e.target.value }))} className="input-base" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="task-date" className="text-xs text-zinc-500 mb-2 block">Data</label>
+                  <input id="task-date" type="date" value={newTask.date}
+                    onChange={e => setNewTask(p => ({ ...p, date: e.target.value }))} className="input-base" />
+                </div>
+                <div>
+                  <label htmlFor="task-time" className="text-xs text-zinc-500 mb-2 block">Horario (opcional)</label>
+                  <input id="task-time" type="time" value={newTask.time}
+                    onChange={e => setNewTask(p => ({ ...p, time: e.target.value }))} className="input-base" />
+                </div>
               </div>
 
               <div>
@@ -458,7 +551,7 @@ function OrganizadorApp() {
 
               <div>
                 <p className="text-xs text-zinc-500 mb-3">Esforco estimado</p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   {efforts.map(e => (
                     <button key={e.v} onClick={() => setNewTask(p => ({ ...p, effort: e.v }))}
                       className={`pill pill-${e.v} ${newTask.effort === e.v ? 'active' : ''}`}>{e.l}</button>
@@ -466,9 +559,24 @@ function OrganizadorApp() {
                 </div>
               </div>
 
-              <button onClick={addTask} disabled={!newTask.title.trim()}
+              {/* Circular companion toggle — only shown for "aula" with a time */}
+              {newTask.category === 'aula' && newTask.time && (
+                <label className="flex items-start gap-3 bg-cyan-500/10 border border-cyan-500/25 rounded-xl p-3 cursor-pointer">
+                  <input type="checkbox" checked={newTask.generateCircular}
+                    onChange={e => setNewTask(p => ({ ...p, generateCircular: e.target.checked }))}
+                    className="mt-0.5 w-4 h-4 accent-cyan-500 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-medium text-cyan-200">Gerar tarefa "Pegar circular"</p>
+                    <p className="text-[11px] text-cyan-400/70 leading-relaxed mt-0.5">
+                      Calcula a hora de sair de casa pra pegar o 110 e chegar na aula a tempo (10min caminhada + 5min bus + 7min ate a sala + 5min buffer).
+                    </p>
+                  </div>
+                </label>
+              )}
+
+              <button onClick={saveTask} disabled={!newTask.title.trim()}
                 className="w-full bg-indigo-500 hover:bg-indigo-400 disabled:opacity-20 text-white font-medium py-4 rounded-xl transition-colors text-sm mt-2">
-                Adicionar tarefa
+                {editingId ? 'Salvar alteracoes' : 'Adicionar tarefa'}
               </button>
             </div>
           </div>
