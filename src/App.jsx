@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { loadCache, saveCache, fetchAllData, createTask, defaultState } from './store';
+import { loadCache, saveCache, fetchAllData, createTask, defaultState, getDateKey } from './store';
 import { useAuth } from './lib/auth';
 import Login from './components/Login';
 import Hoje from './components/Hoje';
@@ -91,7 +91,7 @@ function OrganizadorApp() {
     const task = {
       id: 'tmp-' + Date.now(),
       title: newTask.title.trim(), category: newTask.category, effort: newTask.effort,
-      time: newTask.time, done: false, date: new Date().toISOString().split('T')[0], recurring: false,
+      time: newTask.time, done: false, date: getDateKey(), recurring: false,
     };
     updateState(prev => ({ ...prev, tasks: [...prev.tasks, task] }));
     setNewTask({ title: '', category: 'pessoal', effort: '30', time: '' });

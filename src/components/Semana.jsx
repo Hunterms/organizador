@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, AlertTriangle, Clock, Calendar } from 'lucide-react';
-import { generateReviewSchedule } from '../store';
+import { generateReviewSchedule, getDateKey } from '../store';
 
 function urgencyMeta(d) {
   if (d < 7) return { label: 'Urgente', cls: 'urgency-high', Icon: AlertTriangle };
@@ -28,9 +28,8 @@ function getWeekDays(offset = 0) {
   });
 }
 
-function dateKey(d) {
-  return d.toISOString().split('T')[0];
-}
+// Alias the canonical local-timezone helper so we don't drift into UTC here.
+const dateKey = getDateKey;
 
 export default function Semana({ state }) {
   const [weekOffset, setWeekOffset] = useState(0);

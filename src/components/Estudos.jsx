@@ -7,7 +7,7 @@ import {
   Brain, Shuffle, Flame,
 } from 'lucide-react';
 import {
-  parseSyllabus, generateReviewSchedule, getSubjectStudyStats,
+  parseSyllabus, generateReviewSchedule, getSubjectStudyStats, getDateKey,
   createSubject as createSubjectDb, deleteSubject as deleteSubjectDb, dismissSubject as dismissSubjectDb,
   createTopic as createTopicDb, updateTopic as updateTopicDb, deleteTopic as deleteTopicDb,
   createExam as createExamDb,
@@ -560,7 +560,7 @@ export default function Estudos({ state, updateState, userId }) {
                           <div className="flex items-center gap-1.5 flex-wrap mt-2">
                             <span className="text-[10px] text-zinc-600">Revisoes:</span>
                             {reviews.map((r, j) => {
-                              const today = r === new Date().toISOString().split('T')[0];
+                              const today = r === getDateKey();
                               return <span key={j} className={`text-[10px] px-2 py-0.5 rounded-md ${today ? 'bg-violet-500/25 text-violet-300 font-bold' : 'bg-zinc-800/60 text-zinc-600'}`}>
                                 {new Date(r+'T12:00').toLocaleDateString('pt-BR', { day:'numeric', month:'short' })}
                               </span>;
