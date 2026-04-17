@@ -134,6 +134,9 @@ export async function fetchAllData(userId) {
       google_event_id: t.google_event_id,
       // source is needed by the UI to pick hard-delete (manual) vs soft-dismiss (imports)
       source: t.source || 'manual',
+      // companion_task_id links a child task (e.g. "Pegar circular") back to
+      // its parent (an "aula"). Deleting the parent cascades a cleanup.
+      companion_task_id: t.companion_task_id,
     })),
     subjects: subjectsWithChildren,
     kanban,
@@ -161,6 +164,9 @@ export async function createTask(userId, task) {
     effort: task.effort, time: task.time || null, done: !!task.done,
     date: task.date, recurring: !!task.recurring,
   };
+  // Companion link (e.g., circular task → aula parent). Only sent when set so
+  // older schemas without the column keep working.
+  if (task.companion_task_id) payload.companion_task_id = task.companion_task_id;
   const { data, error } = await supabase.from('tasks').insert(payload).select().single();
   if (error) throw error;
   return { id: data.id, ...task };
@@ -173,7 +179,9 @@ export async function updateTask(taskId, updates) {
   if ('effort' in updates) dbUpdates.effort = updates.effort;
   if ('time' in updates) dbUpdates.time = updates.time || null;
   if ('done' in updates) dbUpdates.done = updates.done;
+  if ('date' in updates) dbUpdates.date = updates.date;
   if ('position' in updates) dbUpdates.position = updates.position;
+  if ('companion_task_id' in updates) dbUpdates.companion_task_id = updates.companion_task_id;
   const { error } = await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
   if (error) throw error;
 }
