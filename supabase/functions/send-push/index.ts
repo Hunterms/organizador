@@ -1,11 +1,12 @@
 // Supabase Edge Function: send-push
 // Sends Web Push notifications via VAPID.
 //
-// Modes:
-//   { test: true }          → caller (from JWT) gets a test notification.
-//   { cron: "<CRON_SECRET>" } → scheduled reminders for all users (Fase 2).
+// Modes (POST body):
+//   { test: true }                     → caller (from JWT) gets a test push.
+//   { cron: "<CRON_SECRET>", job: "digest" } → morning summary per user.
+//   { cron: "<CRON_SECRET>", job: "timed" }  → reminders for tasks due soon.
 //
-// Secrets required (Project → Edge Functions → Secrets):
+// Secrets (Project → Edge Functions → Secrets):
 //   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (mailto:...), CRON_SECRET
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 
@@ -25,19 +26,51 @@ const VAPID_PUBLIC = Deno.env.get("VAPID_PUBLIC_KEY")!;
 const VAPID_PRIVATE = Deno.env.get("VAPID_PRIVATE_KEY")!;
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") || "mailto:hunter.soares.c@gmail.com";
 const CRON_SECRET = Deno.env.get("CRON_SECRET") || "";
+const TZ = "America/Sao_Paulo";
 
 webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
+
+// Casa routine default labels — must match Casa.jsx / store.js.
+const DEFAULT_ROOM_LABELS: Record<string, string> = {
+  areia_gato: "Limpar areia do gato", comida_gato: "Dar comida pro gato",
+  sala: "Limpar sala", quarto: "Arrumar quarto", escritorio: "Organizar escritorio",
+  banheiro: "Limpar banheiro", lavanderia: "Lavar roupas",
+  lixo_organico: "Descer lixo organico", lixo_reciclavel: "Descer lixo reciclavel",
+};
+const REVIEW_OFFSETS = [-18, -7, -5, -3, -2];
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json" } });
 
+type Admin = ReturnType<typeof createClient>;
+
+// Current date + minute-of-day in the user's timezone.
+function nowLocal() {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(new Date()).map((p) => [p.type, p.value]),
+  );
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  const minutes = parseInt(parts.hour) * 60 + parseInt(parts.minute);
+  return { date, minutes };
+}
+
+const toUTCDate = (s: string) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
+const daysBetween = (a: string, b: string) => Math.round((toUTCDate(a) - toUTCDate(b)) / 86400000);
+function addDays(s: string, n: number) {
+  const d = new Date(toUTCDate(s) + n * 86400000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+const weekday = (s: string) => new Date(`${s}T12:00:00Z`).getUTCDay();
+const parseHHMM = (t: string) => { const [h, m] = t.split(":"); return (+h) * 60 + (+m); };
+
 // Deliver one payload to every subscription of the given users. Cleans up
-// subscriptions the push service reports as gone (404/410).
-async function deliver(admin: ReturnType<typeof createClient>, userIds: string[], payload: unknown) {
+// subscriptions the push service reports gone (404/410).
+async function deliver(admin: Admin, userIds: string[], payload: unknown) {
   const { data: subs } = await admin
-    .from("push_subscriptions")
-    .select("endpoint, p256dh, auth")
-    .in("user_id", userIds);
+    .from("push_subscriptions").select("endpoint, p256dh, auth").in("user_id", userIds);
   let sent = 0, removed = 0;
   for (const s of subs ?? []) {
     try {
@@ -51,12 +84,98 @@ async function deliver(admin: ReturnType<typeof createClient>, userIds: string[]
       if (code === 404 || code === 410) {
         await admin.from("push_subscriptions").delete().eq("endpoint", s.endpoint);
         removed++;
-      } else {
-        console.error("push send failed:", code, String(e));
-      }
+      } else console.error("push send failed:", code, String(e));
     }
   }
   return { sent, removed };
+}
+
+async function subscribedUserIds(admin: Admin): Promise<string[]> {
+  const { data } = await admin.from("push_subscriptions").select("user_id");
+  return [...new Set((data ?? []).map((r: { user_id: string }) => r.user_id))];
+}
+
+// Ensure today's home-routine items exist as casa tasks (same as the client
+// does on open — but server-side, so the board is ready each morning).
+async function materializeRoutine(admin: Admin, userId: string, today: string) {
+  const dow = weekday(today);
+  const [{ data: routine }, { data: custom }, { data: existing }] = await Promise.all([
+    admin.from("home_routine").select("room_key, days").eq("user_id", userId),
+    admin.from("custom_rooms").select("key, label").eq("user_id", userId),
+    admin.from("tasks").select("title").eq("user_id", userId).eq("date", today).eq("category", "casa"),
+  ]);
+  const have = new Set((existing ?? []).map((t: { title: string }) => t.title.toLowerCase()));
+  const labelOf = (key: string) =>
+    DEFAULT_ROOM_LABELS[key] || (custom ?? []).find((c: { key: string }) => c.key === key)?.label || null;
+  const rows = [];
+  for (const r of routine ?? []) {
+    if (!Array.isArray(r.days) || !r.days.includes(dow)) continue;
+    const title = labelOf(r.room_key);
+    if (!title || have.has(title.toLowerCase())) continue;
+    have.add(title.toLowerCase());
+    rows.push({ user_id: userId, title, category: "casa", effort: "30", time: null, done: false, date: today, recurring: true });
+  }
+  if (rows.length) await admin.from("tasks").insert(rows);
+}
+
+// Morning digest: materialize routine, then summarize today for each user.
+async function runDigest(admin: Admin) {
+  const { date: today } = nowLocal();
+  const users = await subscribedUserIds(admin);
+  let delivered = 0;
+  for (const uid of users) {
+    await materializeRoutine(admin, uid, today);
+
+    const { data: tasks } = await admin
+      .from("tasks").select("title").eq("user_id", uid).eq("date", today)
+      .eq("done", false).or("dismissed.is.null,dismissed.eq.false");
+    const taskCount = (tasks ?? []).length;
+
+    const { data: exams } = await admin
+      .from("exams").select("name, date, subjects(name)").eq("user_id", uid);
+    const reviewsToday: string[] = [];
+    let examSoon: { name: string; d: number } | null = null;
+    for (const e of exams ?? []) {
+      const subj = (e as { subjects?: { name?: string } }).subjects?.name || e.name;
+      const d = daysBetween(e.date, today);
+      if (d >= 0 && d <= 5 && (!examSoon || d < examSoon.d)) examSoon = { name: subj, d };
+      for (const off of REVIEW_OFFSETS) {
+        if (addDays(e.date, off) === today) reviewsToday.push(subj);
+      }
+    }
+
+    const parts: string[] = [];
+    if (taskCount > 0) parts.push(`${taskCount} tarefa${taskCount > 1 ? "s" : ""} hoje`);
+    if (reviewsToday.length) parts.push(`revisar ${[...new Set(reviewsToday)].join(", ")}`);
+    if (examSoon) parts.push(`prova de ${examSoon.name} ${examSoon.d === 0 ? "hoje" : `em ${examSoon.d}d`}`);
+    if (!parts.length) continue; // nothing to say → no ping
+
+    const res = await deliver(admin, [uid], {
+      title: "Bom dia!", body: parts.join(" · "), url: "/", tag: "digest",
+    });
+    delivered += res.sent;
+  }
+  return { job: "digest", delivered };
+}
+
+// Timed reminders: tasks with a time that are due within ~15 min.
+async function runTimed(admin: Admin) {
+  const { date: today, minutes: nowMin } = nowLocal();
+  const { data: tasks } = await admin
+    .from("tasks").select("id, user_id, title, time, category")
+    .eq("date", today).eq("done", false).is("reminded_at", null).not("time", "is", null);
+  let delivered = 0;
+  for (const t of tasks ?? []) {
+    if (!t.time) continue;
+    const diff = parseHHMM(t.time) - nowMin;
+    if (diff > 15 || diff < -2) continue; // only within the 15-min lead window
+    const res = await deliver(admin, [t.user_id], {
+      title: `Em breve: ${t.title}`, body: `${t.time}${t.category ? " · " + t.category : ""}`, url: "/", tag: `task-${t.id}`,
+    });
+    await admin.from("tasks").update({ reminded_at: new Date().toISOString() }).eq("id", t.id);
+    delivered += res.sent;
+  }
+  return { job: "timed", delivered };
 }
 
 Deno.serve(async (req) => {
@@ -69,20 +188,15 @@ Deno.serve(async (req) => {
       const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
       const { data: { user } } = await admin.auth.getUser(jwt);
       if (!user) return json({ error: "unauthorized" }, 401);
-      const res = await deliver(admin, [user.id], {
-        title: "Organizador",
-        body: "Notificacao de teste chegou! Tudo certo por aqui.",
-        url: "/",
-        tag: "test",
-      });
-      return json(res);
+      return json(await deliver(admin, [user.id], {
+        title: "Organizador", body: "Notificacao de teste chegou! Tudo certo por aqui.", url: "/", tag: "test",
+      }));
     }
 
-    // Fase 2: scheduled reminders. Guarded by a shared secret so pg_cron can
-    // call it without a user JWT.
     if (body.cron && CRON_SECRET && body.cron === CRON_SECRET) {
-      // TODO(Fase 2): query due routine/tasks/exams and deliver per user.
-      return json({ ok: true, note: "cron path not implemented yet" });
+      if (body.job === "digest") return json(await runDigest(admin));
+      if (body.job === "timed") return json(await runTimed(admin));
+      return json({ error: "unknown job" }, 400);
     }
 
     return json({ error: "nothing to do" }, 400);
