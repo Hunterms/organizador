@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import {
   ChevronDown, ChevronUp, Plus, BookOpen, X, Calendar, FileText,
   AlertTriangle, Clock, Upload, FileUp, Loader2, Lightbulb,
@@ -7,11 +7,14 @@ import {
   Brain, Shuffle, Flame, Pencil, Check, Trash2,
 } from 'lucide-react';
 import {
-  parseSyllabus, generateReviewSchedule, getSubjectStudyStats, getDateKey,
+  generateReviewSchedule, getSubjectStudyStats, getDateKey,
   createSubject as createSubjectDb, updateSubject as updateSubjectDb, deleteSubject as deleteSubjectDb, dismissSubject as dismissSubjectDb,
   createTopic as createTopicDb, updateTopic as updateTopicDb, deleteTopic as deleteTopicDb,
   createExam as createExamDb, updateExam as updateExamDb, deleteExam as deleteExamDb,
+  updateClassSchedule as updateClassScheduleDb, attendanceSummary,
 } from '../store';
+
+const dayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
 import {
   getTodayReviewQueue, generateInterleavedSession,
   getSubjectInCrunch, buildCrunchPlan,
@@ -85,30 +88,11 @@ function urgencyMeta(d) {
   return { label: 'Tranquilo', cls: 'urgency-low', Icon: Calendar };
 }
 
-// Load the pdf.js worker from the bundled package instead of a CDN — the
-// old CDN path (cdnjs with pdfjsLib.version) can 404 for newer releases of
-// pdfjs-dist, which fails silently and leaves the UI stuck on "Lendo...".
-// Vite's `?url` suffix resolves the package path and returns a URL string.
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-
-async function extractPdfText(file) {
-  const pdfjsLib = await import('pdfjs-dist');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let text = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += content.items.map(item => item.str).join(' ') + '\n';
-  }
-  return text;
-}
-
 export default function Estudos({ state, updateState, userId }) {
   const [expanded, setExpanded] = useState(null);
   const [showAddSubject, setShowAddSubject] = useState(false);
-  const [showSyllabus, setShowSyllabus] = useState(null);
+  const [showSchedule, setShowSchedule] = useState(null);
+  const [newSlot, setNewSlot] = useState({ day: 1, time: '', duration: 120, room: '' });
   const [showAddExam, setShowAddExam] = useState(null);
   const [newSubject, setNewSubject] = useState({ name: '', code: '' });
   const [newTopic, setNewTopic] = useState('');
@@ -118,10 +102,6 @@ export default function Estudos({ state, updateState, userId }) {
   const [editingSubjectId, setEditingSubjectId] = useState(null);
   const [subjectNameDraft, setSubjectNameDraft] = useState('');
   const [newExam, setNewExam] = useState({ name: '', date: '' });
-  const [syllabusText, setSyllabusText] = useState('');
-  const [loadingPdf, setLoadingPdf] = useState(false);
-  const [pdfError, setPdfError] = useState(null);
-  const fileRef = useRef(null);
 
   // Retrieval modal state: { topic, subject } when open, null when closed.
   // Also drives the interleaved session (queue of topics to cycle through).
@@ -184,29 +164,21 @@ export default function Estudos({ state, updateState, userId }) {
     }) }));
   };
 
-  const handlePdf = async (sid, e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPdfError(null);
-    setLoadingPdf(true);
-    try {
-      const text = await extractPdfText(file);
-      if (!text.trim()) {
-        setPdfError('PDF lido, mas nenhum texto foi extraido. Pode ser um PDF de imagens escaneadas (precisa OCR).');
-        setSyllabusText('');
-      } else {
-        setSyllabusText(text);
-        // Auto-open the syllabus textarea for this subject so the user sees the result
-        setShowSyllabus(sid);
-      }
-    } catch (err) {
-      console.error('PDF extraction failed:', err);
-      setPdfError(`Nao foi possivel ler o PDF: ${err?.message || err}`);
-      setSyllabusText('');
-    } finally {
-      setLoadingPdf(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
+  // Class schedule: weekly slots stored on subject.class_schedule.
+  const addSlot = (sid) => {
+    if (!newSlot.time) return;
+    const subj = state.subjects.find(s => s.id === sid);
+    const next = [...(subj?.class_schedule || []), { ...newSlot }].sort((a, b) => a.day - b.day || a.time.localeCompare(b.time));
+    updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id === sid ? { ...s, class_schedule: next } : s) }));
+    setNewSlot({ day: 1, time: '', duration: 120, room: '' });
+    setShowSchedule(null);
+    if (userId && !isTmp(sid)) updateClassScheduleDb(sid, next).catch(e => console.error('addSlot sync failed:', e));
+  };
+  const removeSlot = (sid, idx) => {
+    const subj = state.subjects.find(s => s.id === sid);
+    const next = (subj?.class_schedule || []).filter((_, i) => i !== idx);
+    updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id === sid ? { ...s, class_schedule: next } : s) }));
+    if (userId && !isTmp(sid)) updateClassScheduleDb(sid, next).catch(e => console.error('removeSlot sync failed:', e));
   };
 
   // All mutations: optimistic local update, then sync to Supabase. On temp/real
@@ -282,37 +254,6 @@ export default function Estudos({ state, updateState, userId }) {
       }) }));
     } catch (e) {
       console.error('addExam sync failed:', e);
-    }
-  };
-
-  const importSyllabus = async (sid) => {
-    if (!syllabusText.trim()) return;
-    const { topics, exams } = parseSyllabus(syllabusText);
-    // Stamp each parsed item with a tmp id so we can swap it later
-    const stampedTopics = topics.map((t, i) => ({ ...t, id: 'tmp-t-' + Date.now() + '-' + i }));
-    const stampedExams = exams.map((e, i) => ({ ...e, id: 'tmp-e-' + Date.now() + '-' + i }));
-    updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id !== sid ? s : {
-      ...s, syllabus: syllabusText,
-      topics: [...s.topics, ...stampedTopics], exams: [...s.exams, ...stampedExams],
-    }) }));
-    setSyllabusText(''); setShowSyllabus(null);
-    if (!userId || isTmp(sid)) return;
-    // Insert sequentially so a partial failure still persists what worked
-    for (const t of stampedTopics) {
-      try {
-        const saved = await createTopicDb(userId, sid, t);
-        updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id !== sid ? s : {
-          ...s, topics: s.topics.map(x => x.id === t.id ? { ...x, id: saved.id } : x),
-        }) }));
-      } catch (e) { console.error('importSyllabus topic failed:', e); }
-    }
-    for (const ex of stampedExams) {
-      try {
-        const saved = await createExamDb(userId, sid, ex);
-        updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id !== sid ? s : {
-          ...s, exams: s.exams.map(x => x.id === ex.id ? { ...x, id: saved.id } : x),
-        }) }));
-      } catch (e) { console.error('importSyllabus exam failed:', e); }
     }
   };
 
@@ -525,41 +466,68 @@ export default function Estudos({ state, updateState, userId }) {
                   </div>
                 )}
 
-                <div className="card-inner space-y-3">
-                  <p className="text-xs font-medium text-zinc-300 flex items-center gap-2">
-                    <FileUp size={14} className="text-violet-400" aria-hidden="true" /> Importar programa
-                  </p>
-                  <p className="text-[11px] text-zinc-600 leading-relaxed">
-                    Envie o PDF ou cole o texto. Topicos e datas de prova serao extraidos.
-                  </p>
-                  <div className="flex gap-2">
-                    <input type="file" ref={fileRef} accept=".pdf" aria-label="Enviar PDF do programa" onChange={(e) => handlePdf(subject.id, e)} className="hidden" />
-                    <button onClick={() => fileRef.current?.click()} disabled={loadingPdf}
-                      className="flex-1 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 rounded-xl min-h-[44px] text-xs font-medium flex items-center justify-center gap-2 transition-colors">
-                      {loadingPdf ? <><Loader2 size={13} className="animate-spin" aria-hidden="true" /> Lendo...</> : <><Upload size={13} aria-hidden="true" /> PDF</>}
-                    </button>
-                    <button onClick={() => setShowSyllabus(showSyllabus === subject.id ? null : subject.id)}
-                      className="flex-1 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400 rounded-xl min-h-[44px] text-xs font-medium flex items-center justify-center gap-2 transition-colors">
-                      <FileText size={13} aria-hidden="true" /> Texto
-                    </button>
+                <div className="card-inner space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-zinc-300 flex items-center gap-2">
+                      <Clock size={14} className="text-cyan-400" aria-hidden="true" /> Aulas &amp; Presenca
+                    </p>
+                    <button onClick={() => setShowSchedule(showSchedule === subject.id ? null : subject.id)}
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors min-h-[36px] px-2">+ Horario</button>
                   </div>
-                  {pdfError && (
-                    <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2.5 flex items-start gap-2">
-                      <AlertTriangle size={12} className="text-red-400 shrink-0 mt-0.5" aria-hidden="true" />
-                      <p className="text-[11px] text-red-300 leading-relaxed">{pdfError}</p>
+
+                  {(subject.class_schedule || []).length === 0 ? (
+                    <p className="text-[11px] text-zinc-600">Nenhum horario. Adicione quando sair a grade.</p>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      {subject.class_schedule.map((slot, i) => (
+                        <div key={i} className="flex items-center gap-2 text-[12px] text-zinc-300 bg-zinc-800/40 rounded-lg px-3 py-2">
+                          <span className="font-medium w-9">{dayLabels[slot.day]}</span>
+                          <span className="text-zinc-400">{slot.time}</span>
+                          {slot.room && <span className="text-zinc-600">· {slot.room}</span>}
+                          <button onClick={() => removeSlot(subject.id, i)} aria-label="Remover horario"
+                            className="ml-auto text-zinc-700 hover:text-red-400 min-w-[32px] min-h-[32px] flex items-center justify-center"><X size={12} aria-hidden="true" /></button>
+                        </div>
+                      ))}
                     </div>
                   )}
-                  {(showSyllabus === subject.id || syllabusText) && (
+
+                  {showSchedule === subject.id && (
                     <div className="space-y-2 animate-in">
-                      <label htmlFor={`syllabus-${subject.id}`} className="sr-only">Texto do programa</label>
-                      <textarea id={`syllabus-${subject.id}`} placeholder="Cole o programa/ementa aqui..." value={syllabusText}
-                        onChange={e => setSyllabusText(e.target.value)} rows={4} className="input-base resize-none text-[13px] leading-relaxed" />
-                      <button onClick={() => importSyllabus(subject.id)} disabled={!syllabusText.trim()}
-                        className="w-full bg-violet-500 hover:bg-violet-400 disabled:opacity-20 text-white py-2.5 rounded-xl text-xs font-medium transition-colors">
-                        Gerar topicos
-                      </button>
+                      <div className="grid grid-cols-7 gap-1">
+                        {dayLabels.map((d, i) => (
+                          <button key={i} onClick={() => setNewSlot(p => ({ ...p, day: i }))}
+                            aria-pressed={newSlot.day === i} aria-label={d}
+                            className={`h-9 rounded-lg text-[10px] font-medium transition-colors ${newSlot.day === i ? 'bg-cyan-500/25 text-cyan-300' : 'bg-zinc-800/50 text-zinc-500 hover:bg-zinc-800'}`}>{d[0]}</button>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <input type="time" value={newSlot.time} onChange={e => setNewSlot(p => ({ ...p, time: e.target.value }))} className="input-base text-[13px] flex-1" aria-label="Horario da aula" />
+                        <input placeholder="Sala" value={newSlot.room} onChange={e => setNewSlot(p => ({ ...p, room: e.target.value }))} autoComplete="off" className="input-base text-[13px] w-24" aria-label="Sala" />
+                        <button onClick={() => addSlot(subject.id)} disabled={!newSlot.time} className="bg-cyan-500 hover:bg-cyan-400 disabled:opacity-30 text-white px-4 rounded-xl text-xs min-h-[44px]">OK</button>
+                      </div>
                     </div>
                   )}
+
+                  {(() => {
+                    const att = attendanceSummary(subject, state.attendance);
+                    if (att.slots === 0) return null;
+                    const danger = att.remaining <= 2;
+                    return (
+                      <div className="pt-1">
+                        <div className="flex items-center justify-between text-[11px] mb-1.5">
+                          <span className="text-zinc-400">Faltas: <span className="text-white font-medium tabular-nums">{att.absences}</span> / {att.maxMisses}</span>
+                          <span className={danger ? 'text-red-400 font-semibold' : 'text-zinc-500'}>
+                            {att.remaining === 0 ? 'no limite!' : `pode faltar +${att.remaining}`}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden" role="progressbar" aria-valuenow={att.absences} aria-valuemin={0} aria-valuemax={att.maxMisses}>
+                          <div className={`h-full rounded-full transition-[width] ${danger ? 'bg-red-500' : 'bg-cyan-500'}`}
+                            style={{ width: `${att.maxMisses ? Math.min(100, (att.absences / att.maxMisses) * 100) : 0}%` }} />
+                        </div>
+                        <p className="text-[10px] text-zinc-600 mt-1.5">Limite de 25% (~{att.totalPlanned} aulas no semestre). Marque presenca no Hoje.</p>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="card-inner">
