@@ -148,6 +148,8 @@ export async function fetchAllData(userId) {
       // Pomodoro-gated completion (gamification).
       required_pomodoros: t.required_pomodoros || 0,
       pomodoros_done: t.pomodoros_done || 0,
+      // Optional study guide (HTML) attached to this task.
+      guide_id: t.guide_id || null,
     })),
     subjects: subjectsWithChildren,
     kanban,
@@ -212,6 +214,14 @@ export async function deleteTask(taskId) {
 export async function dismissTask(taskId) {
   const { error } = await supabase.from('tasks').update({ dismissed: true }).eq('id', taskId);
   if (error) throw error;
+}
+
+// Fetch a study guide's HTML on demand (not loaded with the task list to keep
+// the initial payload small).
+export async function getGuide(guideId) {
+  const { data, error } = await supabase.from('study_guides').select('title, html').eq('id', guideId).single();
+  if (error) throw error;
+  return data;
 }
 
 // Subjects
