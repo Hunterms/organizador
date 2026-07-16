@@ -4,16 +4,14 @@ import { buildCircularTask } from './lib/circular';
 import { useAuth } from './lib/auth';
 import Login from './components/Login';
 import Hoje from './components/Hoje';
-import Semana from './components/Semana';
 import Estudos from './components/Estudos';
-import Trabalho from './components/Trabalho';
 import Casa from './components/Casa';
 import Agua from './components/Agua';
 import Pomodoro from './components/Pomodoro';
 import AIPanel from './components/AIPanel';
 import {
-  CalendarCheck, CalendarDays, GraduationCap, Briefcase,
-  Home, Droplets, Brain, Timer, Plus, X, LogOut, Loader2,
+  CalendarCheck, GraduationCap,
+  Home, Droplets, Brain, Timer, Plus, X, LogOut, Loader2, ChevronRight,
   Bell, BellRing, Smartphone
 } from 'lucide-react';
 import { getPushState, enablePush, disablePush, isStandalone, pushSupported } from './lib/push';
@@ -21,13 +19,9 @@ import { supabase } from './lib/supabase';
 
 const tabs = [
   { id: 'hoje', label: 'Hoje', icon: CalendarCheck },
-  { id: 'semana', label: 'Semana', icon: CalendarDays },
   { id: 'estudos', label: 'Estudos', icon: GraduationCap },
   { id: 'pomodoro', label: 'Pomodoro', icon: Timer },
-  { id: 'trabalho', label: 'Trabalho', icon: Briefcase },
-  { id: 'casa', label: 'Casa', icon: Home },
   { id: 'agua', label: 'Agua', icon: Droplets },
-  { id: 'ia', label: 'IA', icon: Brain },
 ];
 
 const categories = ['aula', 'estudos', 'trabalho', 'terreiro', 'pessoal', 'casa'];
@@ -63,6 +57,8 @@ function OrganizadorApp() {
   // When set, Pomodoro pre-selects this focus target (e.g. "task|<id>").
   const [focusPreselect, setFocusPreselect] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
+  // Fullscreen page opened from the profile menu ('casa' | 'ia' | null).
+  const [profilePage, setProfilePage] = useState(null);
   const [syncing, setSyncing] = useState(false);
 
   // Fetch data from Supabase on mount
@@ -249,20 +245,17 @@ function OrganizadorApp() {
     const p = { state, updateState, userId: user?.id };
     switch (activeTab) {
       case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} onGenerateRoutine={generateRoutine} onFocusTask={focusTask} />;
-      case 'semana': return <Semana {...p} />;
       case 'estudos': return <Estudos {...p} />;
       case 'pomodoro': return <Pomodoro {...p} preselectKey={focusPreselect} onPreselectConsumed={() => setFocusPreselect(null)} />;
-      case 'trabalho': return <Trabalho {...p} />;
-      case 'casa': return <Casa {...p} />;
       case 'agua': return <Agua {...p} />;
-      case 'ia': return <AIPanel {...p} />;
     }
   };
 
   return (
     <div className="app-container bg-[#09090b] relative">
       {/* Header */}
-      <header className="page-x pt-6 pb-5 flex items-center justify-between shrink-0">
+      <header className="page-x pb-5 flex items-center justify-between shrink-0"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 22px)' }}>
         <div>
           <h1 className="text-lg font-semibold text-white tracking-tight">Organizador</h1>
           <p className="text-[13px] text-zinc-500 mt-1">
@@ -309,6 +302,25 @@ function OrganizadorApp() {
         </div>
       </nav>
 
+      {/* Fullscreen page opened from the profile menu (Casa / IA) */}
+      {profilePage && (
+        <div className="fixed inset-0 z-50 bg-[#09090b] flex flex-col animate-in">
+          <div className="page-x pb-4 flex items-center gap-3 border-b border-zinc-800/50 shrink-0"
+            style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 20px)' }}>
+            <button onClick={() => setProfilePage(null)} aria-label="Voltar"
+              className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-white rounded-xl -ml-2">
+              <X size={20} />
+            </button>
+            <h2 className="text-base font-semibold text-white">{profilePage === 'casa' ? 'Rotina de casa' : 'Assistente IA'}</h2>
+          </div>
+          <div className="flex-1 overflow-y-auto page-x pt-5 pb-10">
+            {profilePage === 'casa'
+              ? <Casa state={state} updateState={updateState} userId={user?.id} />
+              : <AIPanel state={state} updateState={updateState} userId={user?.id} />}
+          </div>
+        </div>
+      )}
+
       {/* User Menu Modal */}
       {showMenu && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
@@ -327,7 +339,22 @@ function OrganizadorApp() {
             {/* Scrollable body */}
             <div className="overflow-y-auto px-7 pt-6 pb-8 flex-1">
             <p className="text-xs text-zinc-500 mb-1">Logado como</p>
-            <p className="text-sm text-white font-medium mb-8 break-all">{user?.email}</p>
+            <p className="text-sm text-white font-medium mb-6 break-all">{user?.email}</p>
+
+            {/* Pages (config-like, not daily) */}
+            <div className="flex flex-col gap-2 mb-6">
+              {[
+                { id: 'casa', label: 'Rotina de casa', Icon: Home, color: 'text-pink-400' },
+                { id: 'ia', label: 'Assistente IA', Icon: Brain, color: 'text-violet-400' },
+              ].map(item => (
+                <button key={item.id} onClick={() => { setProfilePage(item.id); setShowMenu(false); }}
+                  className="flex items-center gap-3 card-inner hover:bg-[#1f1f23] transition-colors min-h-[52px] text-left">
+                  <item.Icon size={16} className={`${item.color} shrink-0`} aria-hidden="true" />
+                  <span className="text-sm text-zinc-200 flex-1">{item.label}</span>
+                  <ChevronRight size={16} className="text-zinc-600 shrink-0" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
 
             {/* Push notifications */}
             <div className="card-inner mb-6">

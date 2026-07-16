@@ -272,66 +272,6 @@ export default function Pomodoro({ state, updateState, userId, preselectKey, onP
 
   return (
     <div className="section-gap animate-in">
-      {/* Unified focus target: tabs separate tarefa/trabalho/estudo so the
-          picker stays scannable when each bucket grows */}
-      <div className="card space-y-4">
-        <p className="text-xs font-medium text-zinc-400">No que voce vai focar</p>
-        {/* Tabs */}
-        <div className="flex gap-1 bg-zinc-800/40 p-1 rounded-xl">
-          {[
-            { id: 'tarefa',   label: 'Tarefa',   icon: '✅', count: focusOptions.tasks.length },
-            { id: 'trabalho', label: 'Trabalho', icon: '🧰', count: focusOptions.kanban.length },
-            { id: 'estudo',   label: 'Estudo',   icon: '📚', count: focusOptions.topics.length },
-          ].map(tab => {
-            const active = activeTab === tab.id;
-            return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                aria-pressed={active}
-                className={`flex-1 min-h-[40px] rounded-lg text-[12px] font-medium transition-colors flex items-center justify-center gap-1.5 ${
-                  active ? 'bg-indigo-500/20 text-indigo-300' : 'text-zinc-500 hover:text-zinc-300'
-                }`}>
-                <span aria-hidden="true">{tab.icon}</span>
-                {tab.label}
-                {tab.count > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-indigo-500/30' : 'bg-zinc-700/60'}`}>
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        {/* Tab content: scrollable list of pickable items */}
-        <div className="max-h-[260px] overflow-y-auto flex flex-col gap-1.5 pr-1">
-          {(() => {
-            const list = activeTab === 'tarefa' ? focusOptions.tasks
-              : activeTab === 'trabalho' ? focusOptions.kanban
-              : focusOptions.topics;
-            if (list.length === 0) {
-              return (
-                <p className="text-[11px] text-zinc-600 text-center py-6 leading-relaxed">
-                  {activeTab === 'tarefa' && 'Nenhuma tarefa pendente de hoje ou futura. Adicione em Hoje.'}
-                  {activeTab === 'trabalho' && 'Nenhum card em andamento. Adicione em Trabalho.'}
-                  {activeTab === 'estudo' && 'Nenhum topico cadastrado. Adicione materias em Estudos.'}
-                </p>
-              );
-            }
-            return list.map(o => {
-              const sel = selectedKey === o.key;
-              return (
-                <button key={o.key} onClick={() => setSelectedKey(sel ? '' : o.key)}
-                  aria-pressed={sel}
-                  className={`text-left px-3 py-2.5 rounded-lg text-[13px] transition-colors min-h-[44px] ${
-                    sel ? 'bg-indigo-500/20 text-indigo-100 ring-1 ring-indigo-500/50' : 'bg-zinc-800/40 text-zinc-200 hover:bg-zinc-800'
-                  }`}>
-                  <span className="block truncate">{o.label}</span>
-                </button>
-              );
-            });
-          })()}
-        </div>
-      </div>
-
       {/* Timer */}
       <div className="card flex flex-col items-center py-12">
         <span className={`inline-flex items-center text-[11px] font-semibold tracking-wide uppercase px-4 py-2 rounded-full mb-10 whitespace-nowrap ${
@@ -417,6 +357,48 @@ export default function Pomodoro({ state, updateState, userId, preselectKey, onP
             />
           ))}
           <span className="text-[11px] text-zinc-500 ml-2">{sessionsCompleted} sessoes</span>
+        </div>
+      </div>
+
+      {/* Focus target — below the timer so the timer stays in view */}
+      <div className="card space-y-4">
+        <p className="text-xs font-medium text-zinc-400">No que voce vai focar</p>
+        <div className="flex gap-1 bg-zinc-800/40 p-1 rounded-xl">
+          {[
+            { id: 'tarefa', label: 'Tarefa', icon: '✅', count: focusOptions.tasks.length },
+            { id: 'estudo', label: 'Estudo', icon: '📚', count: focusOptions.topics.length },
+          ].map(tab => {
+            const active = activeTab === tab.id;
+            return (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} aria-pressed={active}
+                className={`flex-1 min-h-[40px] rounded-lg text-[12px] font-medium transition-colors flex items-center justify-center gap-1.5 ${active ? 'bg-indigo-500/20 text-indigo-300' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                <span aria-hidden="true">{tab.icon}</span>
+                {tab.label}
+                {tab.count > 0 && (<span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-indigo-500/30' : 'bg-zinc-700/60'}`}>{tab.count}</span>)}
+              </button>
+            );
+          })}
+        </div>
+        <div className="max-h-[240px] overflow-y-auto flex flex-col gap-1.5 pr-1">
+          {(() => {
+            const list = activeTab === 'estudo' ? focusOptions.topics : focusOptions.tasks;
+            if (list.length === 0) {
+              return (
+                <p className="text-[11px] text-zinc-600 text-center py-6 leading-relaxed">
+                  {activeTab === 'estudo' ? 'Nenhum topico cadastrado. Adicione materias em Estudos.' : 'Nenhuma tarefa pendente de hoje ou futura. Adicione no Hoje.'}
+                </p>
+              );
+            }
+            return list.map(o => {
+              const sel = selectedKey === o.key;
+              return (
+                <button key={o.key} onClick={() => setSelectedKey(sel ? '' : o.key)} aria-pressed={sel}
+                  className={`text-left px-3 py-2.5 rounded-lg text-[13px] transition-colors min-h-[44px] ${sel ? 'bg-indigo-500/20 text-indigo-100 ring-1 ring-indigo-500/50' : 'bg-zinc-800/40 text-zinc-200 hover:bg-zinc-800'}`}>
+                  <span className="block truncate">{o.label}</span>
+                </button>
+              );
+            });
+          })()}
         </div>
       </div>
 

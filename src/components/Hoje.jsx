@@ -3,7 +3,7 @@ import {
   getDateKey, getTodayReviews,
   updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb,
 } from '../store';
-import { Check, Clock, Sparkles, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play } from 'lucide-react';
+import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -131,29 +131,38 @@ function SortableTask({ task, onToggle, onDelete, onEdit, onFocus, onGuide }) {
   );
 }
 
-export default function Hoje({ state, updateState, userId, onAddTask, onEditTask, onGenerateRoutine, onFocusTask }) {
+export default function Hoje({ state, updateState, userId, onEditTask, onFocusTask }) {
   const today = getDateKey();
   const stats = useMemo(() => computeStats(state), [state]);
   const [guideId, setGuideId] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(today);
+  const isToday = selectedDate === today;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const todayTasks = useMemo(() => {
-    return state.tasks
-      .filter(t => t.date === today)
-      .sort((a, b) => {
-        if (a.done !== b.done) return a.done ? 1 : -1;
-        return 0;
-      });
-  }, [state.tasks, today]);
+  // Day strip: 3 days back → 2 weeks ahead, so you can work ahead.
+  const dayStrip = useMemo(() => {
+    const arr = []; const base = new Date();
+    for (let i = -3; i <= 14; i++) { const d = new Date(base); d.setDate(base.getDate() + i); arr.push(d); }
+    return arr;
+  }, []);
+  const taskCountByDate = useMemo(() => {
+    const m = {}; for (const t of state.tasks) m[t.date] = (m[t.date] || 0) + 1; return m;
+  }, [state.tasks]);
 
-  const totalMinutes = todayTasks.filter(t => !t.done).reduce((sum, t) => sum + parseInt(t.effort || '30'), 0);
-  const doneCount = todayTasks.filter(t => t.done).length;
+  const dayTasks = useMemo(() => {
+    return state.tasks
+      .filter(t => t.date === selectedDate)
+      .sort((a, b) => (a.done !== b.done ? (a.done ? 1 : -1) : 0));
+  }, [state.tasks, selectedDate]);
+
+  const totalMinutes = dayTasks.filter(t => !t.done).reduce((sum, t) => sum + parseInt(t.effort || '30'), 0);
+  const doneCount = dayTasks.filter(t => t.done).length;
   const todayReviews = useMemo(() => getTodayReviews(state.subjects), [state.subjects]);
-  const pct = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
+  const pct = dayTasks.length > 0 ? Math.round((doneCount / dayTasks.length) * 100) : 0;
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
 
@@ -194,7 +203,7 @@ export default function Hoje({ state, updateState, userId, onAddTask, onEditTask
   };
 
   const addReviewTasks = () => {
-    const existing = new Set(todayTasks.map(t => t.title.toLowerCase()));
+    const existing = new Set(dayTasks.map(t => t.title.toLowerCase()));
     const add = todayReviews.filter(r => !existing.has(`revisar ${r.subjectName}`.toLowerCase()))
       .map(r => ({ id: Date.now().toString()+r.subjectId, title:`Revisar ${r.subjectName}`, category:'estudos', effort:'60', time:'', done:false, date:today }));
     if (add.length) updateState(p => ({ ...p, tasks: [...p.tasks, ...add] }));
@@ -203,10 +212,10 @@ export default function Hoje({ state, updateState, userId, onAddTask, onEditTask
   const handleDragEnd = (event) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIdx = todayTasks.findIndex(t => t.id === active.id);
-    const newIdx = todayTasks.findIndex(t => t.id === over.id);
-    const reordered = arrayMove(todayTasks, oldIdx, newIdx);
-    const otherTasks = state.tasks.filter(t => t.date !== today);
+    const oldIdx = dayTasks.findIndex(t => t.id === active.id);
+    const newIdx = dayTasks.findIndex(t => t.id === over.id);
+    const reordered = arrayMove(dayTasks, oldIdx, newIdx);
+    const otherTasks = state.tasks.filter(t => t.date !== selectedDate);
     updateState(p => ({ ...p, tasks: [...otherTasks, ...reordered] }));
   };
 
@@ -215,13 +224,36 @@ export default function Hoje({ state, updateState, userId, onAddTask, onEditTask
       {/* Gamification: streak, level, XP, daily rings */}
       <GameHeader stats={stats} />
 
-      {/* Today's classes → mark presente/faltei */}
-      <AulasHoje state={state} updateState={updateState} userId={userId} />
+      {/* Today's classes → mark presente/faltei (only for today) */}
+      {isToday && <AulasHoje state={state} updateState={updateState} userId={userId} />}
+
+      {/* Day selector — pick a day to work (today or ahead) */}
+      <div className="overflow-x-auto no-scrollbar -mx-1">
+        <div className="flex gap-2 px-1">
+          {dayStrip.map((d) => {
+            const key = getDateKey(d);
+            const sel = key === selectedDate;
+            const isT = key === today;
+            const count = taskCountByDate[key] || 0;
+            return (
+              <button key={key} onClick={() => setSelectedDate(key)} aria-pressed={sel}
+                aria-label={d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                className={`shrink-0 w-[50px] py-2 rounded-xl flex flex-col items-center gap-1 transition-colors ${
+                  sel ? 'bg-indigo-500/20 ring-1 ring-indigo-500' : isT ? 'bg-[#27272a]' : 'bg-[#1c1c22] hover:bg-[#27272a]'
+                }`}>
+                <span className="text-[10px] text-zinc-500 capitalize">{d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</span>
+                <span className={`text-sm font-semibold ${isT ? 'text-indigo-400' : 'text-white'}`}>{d.getDate()}</span>
+                <span className={`w-1.5 h-1.5 rounded-full ${count ? (sel ? 'bg-indigo-400' : 'bg-zinc-600') : 'bg-transparent'}`} />
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Summary with aria-live */}
       <div className="card flex items-center justify-between" aria-live="polite">
         <div>
-          <p className="text-zinc-500 text-xs mb-1">Pendente hoje</p>
+          <p className="text-zinc-500 text-xs mb-1">{isToday ? 'Pendente hoje' : 'Pendente'}</p>
           <p className="text-white font-bold text-2xl tracking-tight">
             {hours > 0 ? `${hours}h` : ''}{mins > 0 ? `${mins}m` : hours === 0 ? '0m' : ''}
           </p>
@@ -229,9 +261,9 @@ export default function Hoje({ state, updateState, userId, onAddTask, onEditTask
         <div className="flex items-center gap-5">
           <div className="text-right">
             <p className="text-zinc-500 text-xs mb-1">Feitas</p>
-            <p className="text-white font-semibold text-lg">{doneCount}/{todayTasks.length}</p>
+            <p className="text-white font-semibold text-lg">{doneCount}/{dayTasks.length}</p>
           </div>
-          {todayTasks.length > 0 && (
+          {dayTasks.length > 0 && (
             <div className="w-12 h-12 rounded-full border-2 border-indigo-500/60 flex items-center justify-center"
               role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${pct}% das tarefas concluidas`}>
               <span className="text-xs font-bold text-indigo-400">{pct}%</span>
@@ -240,8 +272,8 @@ export default function Hoje({ state, updateState, userId, onAddTask, onEditTask
         </div>
       </div>
 
-      {/* Reviews */}
-      {todayReviews.length > 0 && (
+      {/* Reviews (today only) */}
+      {isToday && todayReviews.length > 0 && (
         <button onClick={addReviewTasks}
           className="w-full card-sm !bg-violet-500/5 !border-violet-500/15 flex items-center gap-4 hover:!bg-violet-500/10 transition-colors">
           <BookOpen size={18} className="text-violet-400 shrink-0" aria-hidden="true" />
@@ -253,32 +285,20 @@ export default function Hoje({ state, updateState, userId, onAddTask, onEditTask
         </button>
       )}
 
-      {/* Actions */}
-      <div className="flex gap-3">
-        <button onClick={onGenerateRoutine}
-          className="flex-1 card-sm !py-3 flex items-center justify-center gap-2 text-[13px] text-zinc-400 hover:text-zinc-200 hover:bg-[#1f1f23] transition-colors">
-          <Sparkles size={14} className="text-pink-400" aria-hidden="true" /> Rotina casa
-        </button>
-        <button onClick={onAddTask}
-          className="flex-1 bg-indigo-500/10 border border-indigo-500/20 rounded-[14px] py-3 flex items-center justify-center gap-2 text-[13px] text-indigo-400 hover:bg-indigo-500/15 transition-colors">
-          + Tarefa
-        </button>
-      </div>
-
       {/* Task list */}
-      {todayTasks.length === 0 ? (
+      {dayTasks.length === 0 ? (
         <div className="flex flex-col items-center text-center py-16">
           <div className="w-14 h-14 rounded-2xl bg-[#18181b] border border-zinc-800 flex items-center justify-center mb-4">
             <ClipboardList size={24} className="text-zinc-700" aria-hidden="true" />
           </div>
-          <p className="text-sm font-medium text-zinc-500">Nenhuma tarefa para hoje</p>
-          <p className="text-xs mt-1.5 text-zinc-700">Adicione tarefas ou gere a rotina da casa</p>
+          <p className="text-sm font-medium text-zinc-500">{isToday ? 'Nenhuma tarefa para hoje' : 'Nenhuma tarefa nesse dia'}</p>
+          <p className="text-xs mt-1.5 text-zinc-700">Toque no + no topo pra adicionar</p>
         </div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={todayTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-            <ul className="flex flex-col gap-2.5 list-none" aria-label="Lista de tarefas de hoje">
-              {todayTasks.map(task => (
+          <SortableContext items={dayTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+            <ul className="flex flex-col gap-2.5 list-none" aria-label="Lista de tarefas do dia">
+              {dayTasks.map(task => (
                 <li key={task.id}>
                   <SortableTask task={task} onToggle={toggleTask} onDelete={deleteTask} onEdit={onEditTask} onFocus={onFocusTask} onGuide={setGuideId} />
                 </li>
