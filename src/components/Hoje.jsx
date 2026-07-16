@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   getDateKey, getTodayReviews,
   updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb,
@@ -9,6 +9,7 @@ import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinat
 import { CSS } from '@dnd-kit/utilities';
 import { computeStats, pomodoroGated } from '../lib/gamification';
 import AulasHoje from './AulasHoje';
+import GuideViewer from './GuideViewer';
 
 // One progress ring (Tarefas / Foco / Agua).
 function Ring({ pct, color, letter, label }) {
@@ -66,7 +67,7 @@ function GameHeader({ stats }) {
 const catBorder = { aula: 'border-l-cyan-500', estudos: 'border-l-violet-500', trabalho: 'border-l-blue-500', terreiro: 'border-l-green-500', pessoal: 'border-l-amber-500', casa: 'border-l-pink-500' };
 const effortLabel = { '5': '5m', '10': '10m', '30': '30m', '60': '1h', '120': '2h+' };
 
-function SortableTask({ task, onToggle, onDelete, onEdit, onFocus }) {
+function SortableTask({ task, onToggle, onDelete, onEdit, onFocus, onGuide }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : undefined };
   const gated = pomodoroGated(task);
@@ -104,6 +105,12 @@ function SortableTask({ task, onToggle, onDelete, onEdit, onFocus }) {
           <span className={`effort effort-${task.effort}`}>{effortLabel[task.effort] || '30m'}</span>
         </div>
       </div>
+      {task.guide_id && onGuide && (
+        <button onClick={() => onGuide(task.guide_id)} aria-label={`Abrir guia de ${task.title}`}
+          className="text-indigo-400 hover:text-indigo-300 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
+          <BookOpen size={14} aria-hidden="true" />
+        </button>
+      )}
       {gated && onFocus && (
         <button onClick={() => onFocus(task)} aria-label={`Focar em ${task.title}`}
           className="text-amber-400 hover:text-amber-300 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
@@ -127,6 +134,7 @@ function SortableTask({ task, onToggle, onDelete, onEdit, onFocus }) {
 export default function Hoje({ state, updateState, userId, onAddTask, onEditTask, onGenerateRoutine, onFocusTask }) {
   const today = getDateKey();
   const stats = useMemo(() => computeStats(state), [state]);
+  const [guideId, setGuideId] = useState(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
@@ -272,13 +280,15 @@ export default function Hoje({ state, updateState, userId, onAddTask, onEditTask
             <ul className="flex flex-col gap-2.5 list-none" aria-label="Lista de tarefas de hoje">
               {todayTasks.map(task => (
                 <li key={task.id}>
-                  <SortableTask task={task} onToggle={toggleTask} onDelete={deleteTask} onEdit={onEditTask} onFocus={onFocusTask} />
+                  <SortableTask task={task} onToggle={toggleTask} onDelete={deleteTask} onEdit={onEditTask} onFocus={onFocusTask} onGuide={setGuideId} />
                 </li>
               ))}
             </ul>
           </SortableContext>
         </DndContext>
       )}
+
+      {guideId && <GuideViewer guideId={guideId} onClose={() => setGuideId(null)} />}
     </div>
   );
 }
