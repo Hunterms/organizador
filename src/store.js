@@ -137,6 +137,9 @@ export async function fetchAllData(userId) {
       // companion_task_id links a child task (e.g. "Pegar circular") back to
       // its parent (an "aula"). Deleting the parent cascades a cleanup.
       companion_task_id: t.companion_task_id,
+      // Pomodoro-gated completion (gamification).
+      required_pomodoros: t.required_pomodoros || 0,
+      pomodoros_done: t.pomodoros_done || 0,
     })),
     subjects: subjectsWithChildren,
     kanban,
@@ -163,6 +166,8 @@ export async function createTask(userId, task) {
     user_id: userId, title: task.title, category: task.category,
     effort: task.effort, time: task.time || null, done: !!task.done,
     date: task.date, recurring: !!task.recurring,
+    required_pomodoros: task.required_pomodoros || 0,
+    pomodoros_done: task.pomodoros_done || 0,
   };
   // Companion link (e.g., circular task → aula parent). Only sent when set so
   // older schemas without the column keep working.
@@ -182,6 +187,8 @@ export async function updateTask(taskId, updates) {
   if ('date' in updates) dbUpdates.date = updates.date;
   if ('position' in updates) dbUpdates.position = updates.position;
   if ('companion_task_id' in updates) dbUpdates.companion_task_id = updates.companion_task_id;
+  if ('required_pomodoros' in updates) dbUpdates.required_pomodoros = updates.required_pomodoros;
+  if ('pomodoros_done' in updates) dbUpdates.pomodoros_done = updates.pomodoros_done;
   const { error } = await supabase.from('tasks').update(dbUpdates).eq('id', taskId);
   if (error) throw error;
 }

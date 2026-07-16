@@ -3,6 +3,7 @@ import {
   getDateKey, getSubjectStudyStats,
   createStudySession as createStudySessionDb,
   updateTopic as updateTopicDb,
+  updateTask as updateTaskDb,
 } from '../store';
 import { Play, Pause, SkipForward, RotateCcw, Timer, TrendingUp } from 'lucide-react';
 
@@ -10,7 +11,7 @@ const PHASES = { FOCUS: 'focus', SHORT_BREAK: 'short_break', LONG_BREAK: 'long_b
 const phaseLabels = { focus: 'Foco', short_break: 'Pausa curta', long_break: 'Pausa longa' };
 const phaseColors = { focus: '#6366f1', short_break: '#22c55e', long_break: '#06b6d4' };
 
-export default function Pomodoro({ state, updateState, userId }) {
+export default function Pomodoro({ state, updateState, userId, preselectKey, onPreselectConsumed }) {
   const { pomodoroSettings: settings } = state;
   // The target of the Pomodoro can be a topic (study), a kanban card (work),
   // or any pending task. Serialized as a single string key so the native
@@ -75,9 +76,10 @@ export default function Pomodoro({ state, updateState, userId }) {
       if (task.date && task.date < today) continue;
       out.tasks.push({
         key: `task|${task.id}`,
-        label: `${task.category}: ${task.title}${task.date === today ? '' : ` · ${task.date}`}`,
+        label: `${task.category}: ${task.title}${task.date === today ? '' : ` · ${task.date}`}${task.required_pomodoros ? ` · 🍅 ${task.pomodoros_done || 0}/${task.required_pomodoros}` : ''}`,
         topicName: `✅ ${task.category}: ${task.title}`,
         kind: 'task',
+        taskId: task.id,
         date: task.date,
       });
     }
@@ -108,6 +110,16 @@ export default function Pomodoro({ state, updateState, userId }) {
   const selectedSubjectName = selected?.kind === 'topic'
     ? state.subjects.find(s => s.id === selected.subjectId)?.name
     : null;
+
+  // Apply a focus target handed over from Hoje (a pomodoro-gated task).
+  useEffect(() => {
+    if (preselectKey) {
+      setSelectedKey(preselectKey);
+      setActiveTab('tarefa');
+      onPreselectConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectKey]);
 
   useEffect(() => {
     if (isRunning) {
@@ -195,6 +207,17 @@ export default function Pomodoro({ state, updateState, userId }) {
               lastStudied: getDateKey(),
             }).catch(e => console.error('pomodoro topic sync failed:', e));
           }
+        }
+      }
+
+      // Pomodoro-gated task: count this focus toward the task's requirement.
+      if (selected.kind === 'task' && selected.taskId) {
+        const tid = selected.taskId;
+        const cur = state.tasks.find(t => t.id === tid);
+        const nextDone = (cur?.pomodoros_done || 0) + 1;
+        updateState(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === tid ? { ...t, pomodoros_done: nextDone } : t) }));
+        if (userId && !(typeof tid === 'string' && tid.startsWith('tmp-'))) {
+          updateTaskDb(tid, { pomodoros_done: nextDone }).catch(e => console.error('pomodoro task increment failed:', e));
         }
       }
 

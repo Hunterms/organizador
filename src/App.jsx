@@ -61,8 +61,10 @@ function OrganizadorApp() {
   const [editingId, setEditingId] = useState(null);
   const [newTask, setNewTask] = useState({
     title: '', category: 'pessoal', effort: '30', time: '',
-    date: getDateKey(), generateCircular: true,
+    date: getDateKey(), generateCircular: true, requiredPomodoros: 0,
   });
+  // When set, Pomodoro pre-selects this focus target (e.g. "task|<id>").
+  const [focusPreselect, setFocusPreselect] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const gcal = useGoogleCalendar(user?.id, state);
@@ -152,7 +154,7 @@ function OrganizadorApp() {
 
   const resetTaskForm = () => {
     setEditingId(null);
-    setNewTask({ title: '', category: 'pessoal', effort: '30', time: '', date: getDateKey(), generateCircular: true });
+    setNewTask({ title: '', category: 'pessoal', effort: '30', time: '', date: getDateKey(), generateCircular: true, requiredPomodoros: 0 });
   };
 
   const openAddTask = () => {
@@ -172,8 +174,15 @@ function OrganizadorApp() {
       time: task.time || '',
       date: task.date || getDateKey(),
       generateCircular: false, // explicit opt-in on edit to avoid surprises
+      requiredPomodoros: task.required_pomodoros || 0,
     });
     setShowAddTask(true);
+  };
+
+  // From a pomodoro-gated task in Hoje: jump to Pomodoro focused on it.
+  const focusTask = (task) => {
+    setFocusPreselect(`task|${task.id}`);
+    setActiveTab('pomodoro');
   };
 
   // If the task qualifies (category=aula + time set), compute the "pegar
@@ -207,6 +216,7 @@ function OrganizadorApp() {
       effort: newTask.effort,
       time: newTask.time,
       date: newTask.date || getDateKey(),
+      required_pomodoros: newTask.requiredPomodoros || 0,
     };
     const shouldGenCircular = newTask.category === 'aula' && !!newTask.time && newTask.generateCircular;
 
@@ -250,10 +260,10 @@ function OrganizadorApp() {
   const renderTab = () => {
     const p = { state, updateState, userId: user?.id };
     switch (activeTab) {
-      case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} onGenerateRoutine={generateRoutine} />;
+      case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} onGenerateRoutine={generateRoutine} onFocusTask={focusTask} />;
       case 'semana': return <Semana {...p} />;
       case 'estudos': return <Estudos {...p} />;
-      case 'pomodoro': return <Pomodoro {...p} />;
+      case 'pomodoro': return <Pomodoro {...p} preselectKey={focusPreselect} onPreselectConsumed={() => setFocusPreselect(null)} />;
       case 'trabalho': return <Trabalho {...p} />;
       case 'casa': return <Casa {...p} />;
       case 'agua': return <Agua {...p} />;
@@ -664,6 +674,20 @@ function OrganizadorApp() {
                   {efforts.map(e => (
                     <button key={e.v} onClick={() => setNewTask(p => ({ ...p, effort: e.v }))}
                       className={`pill pill-${e.v} ${newTask.effort === e.v ? 'active' : ''}`}>{e.l}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs text-zinc-500 mb-1">Pomodoros pra concluir</p>
+                <p className="text-[11px] text-zinc-600 mb-3">So conta como feita depois desses focos. Bom pra tarefa de estudo.</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[0, 1, 2, 3, 4].map(n => (
+                    <button key={n} onClick={() => setNewTask(p => ({ ...p, requiredPomodoros: n }))}
+                      aria-pressed={newTask.requiredPomodoros === n}
+                      className={`min-h-[40px] px-3.5 rounded-xl text-xs font-medium transition-colors ${
+                        newTask.requiredPomodoros === n ? 'bg-amber-500/25 text-amber-200 ring-1 ring-amber-500/50' : 'bg-zinc-800/50 text-zinc-400 hover:bg-zinc-800'
+                      }`}>{n === 0 ? 'Nenhum' : `${n} 🍅`}</button>
                   ))}
                 </div>
               </div>
