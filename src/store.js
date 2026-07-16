@@ -330,6 +330,55 @@ export async function deleteHomeRoutine(userId, roomKey) {
   if (error) throw error;
 }
 
+// Canonical labels for the 9 default rooms. Must match Casa.jsx defaultRooms.
+// Kept here (not just in Casa.jsx) so the day-board can resolve a routine key
+// to a real title without importing the component.
+const DEFAULT_ROOM_LABELS = {
+  areia_gato: 'Limpar areia do gato', comida_gato: 'Dar comida pro gato',
+  sala: 'Limpar sala', quarto: 'Arrumar quarto', escritorio: 'Organizar escritorio',
+  banheiro: 'Limpar banheiro', lavanderia: 'Lavar roupas',
+  lixo_organico: 'Descer lixo organico', lixo_reciclavel: 'Descer lixo reciclavel',
+};
+
+// Resolve a home-routine key to its title. Custom rooms (key "custom_...") live
+// in state.customRooms, so we fall back there. Returns null for orphan keys —
+// the caller MUST skip those instead of creating a titleless task (that was the
+// "broken task on the day board" bug).
+export function roomLabelFor(key, customRooms = []) {
+  return DEFAULT_ROOM_LABELS[key] || customRooms.find(r => r.key === key)?.label || null;
+}
+
+// Materialize today's home routine into real, persisted day-board tasks.
+// - Skips rooms not scheduled for today's weekday.
+// - Skips orphan keys with no resolvable title.
+// - Dedupes against casa tasks already on today's board (by title).
+// Returns the created task rows so the caller can merge them into state. Each
+// insert is awaited individually so one failure doesn't drop the rest.
+export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, customRooms }) {
+  const today = getDateKey();
+  const dow = new Date().getDay();
+  const existing = new Set(
+    (tasks || [])
+      .filter(t => t.date === today && t.category === 'casa')
+      .map(t => t.title.toLowerCase())
+  );
+  const created = [];
+  for (const [key, cfg] of Object.entries(homeRoutine || {})) {
+    if (!cfg?.days?.includes(dow)) continue;
+    const title = roomLabelFor(key, customRooms);
+    if (!title || existing.has(title.toLowerCase())) continue;
+    try {
+      const saved = await createTask(userId, {
+        title, category: 'casa', effort: '30', time: '',
+        done: false, date: today, recurring: true,
+      });
+      created.push(saved);
+      existing.add(title.toLowerCase());
+    } catch (e) { console.error('ensureTodayRoutineTasks failed for', key, e); }
+  }
+  return created;
+}
+
 // Custom rooms
 export async function createCustomRoom(userId, room) {
   const { error } = await supabase.from('custom_rooms').insert({

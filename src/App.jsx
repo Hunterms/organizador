@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey } from './store';
+import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey, ensureTodayRoutineTasks } from './store';
 import { buildCircularTask } from './lib/circular';
 import { useAuth } from './lib/auth';
 import Login from './components/Login';
@@ -78,9 +78,20 @@ function OrganizadorApp() {
     if (!user) return;
     setSyncing(true);
     fetchAllData(user.id)
-      .then(data => {
+      .then(async data => {
         setState(data);
         saveCache(data);
+        // Auto-drop today's home routine onto the day board, once per day.
+        // Dedupes against existing casa tasks, so it can't double up; the
+        // per-day flag stops it from re-adding items the user deleted today.
+        const dayFlag = 'routine_gen_' + getDateKey();
+        if (!localStorage.getItem(dayFlag)) {
+          try {
+            const created = await ensureTodayRoutineTasks(user.id, data);
+            if (created.length) setState(prev => ({ ...prev, tasks: [...prev.tasks, ...created] }));
+            localStorage.setItem(dayFlag, '1');
+          } catch (e) { console.error('routine auto-gen failed:', e); }
+        }
       })
       .catch(err => console.error('Fetch failed, using cache:', err))
       .finally(() => setSyncing(false));
@@ -92,6 +103,16 @@ function OrganizadorApp() {
   const updateState = useCallback((updater) => {
     setState(prev => typeof updater === 'function' ? updater(prev) : { ...prev, ...updater });
   }, []);
+
+  // Manual "Rotina casa" button in Hoje. Same materialization as the auto-run,
+  // so custom rooms get real titles and everything persists + dedupes.
+  const generateRoutine = useCallback(async () => {
+    if (!user) return;
+    try {
+      const created = await ensureTodayRoutineTasks(user.id, state);
+      if (created.length) setState(prev => ({ ...prev, tasks: [...prev.tasks, ...created] }));
+    } catch (e) { console.error('generateRoutine failed:', e); }
+  }, [user, state]);
 
   const resetTaskForm = () => {
     setEditingId(null);
@@ -193,7 +214,7 @@ function OrganizadorApp() {
   const renderTab = () => {
     const p = { state, updateState, userId: user?.id };
     switch (activeTab) {
-      case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} />;
+      case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} onGenerateRoutine={generateRoutine} />;
       case 'semana': return <Semana {...p} />;
       case 'estudos': return <Estudos {...p} />;
       case 'pomodoro': return <Pomodoro {...p} />;
@@ -235,13 +256,14 @@ function OrganizadorApp() {
       {/* Bottom Nav */}
       <nav className="fixed bottom-0 left-0 right-0 bg-[#09090b]/95 backdrop-blur-lg border-t border-zinc-800/50 z-40 flex justify-center"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-        <div className="w-full max-w-[640px] flex justify-around py-2 px-3 sm:px-6">
+        <div className="w-full max-w-[640px] overflow-x-auto no-scrollbar">
+        <div className="flex justify-around gap-0.5 py-2 px-2 sm:px-6 w-max min-w-full mx-auto">
           {tabs.map(tab => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
             return (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} aria-label={tab.label}
-                className={`flex flex-col items-center gap-1 min-w-[44px] min-h-[48px] justify-center rounded-xl transition-colors text-[10px] ${
+                className={`flex flex-col items-center gap-1 shrink-0 min-w-[44px] min-h-[48px] justify-center rounded-xl transition-colors text-[10px] ${
                   active ? 'text-indigo-400' : 'text-zinc-600 hover:text-zinc-400'
                 }`}>
                 <Icon size={18} strokeWidth={active ? 2.5 : 1.5} />
@@ -249,6 +271,7 @@ function OrganizadorApp() {
               </button>
             );
           })}
+        </div>
         </div>
       </nav>
 
