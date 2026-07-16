@@ -8,6 +8,7 @@ import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, 
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { computeStats, pomodoroGated } from '../lib/gamification';
+import AulasHoje from './AulasHoje';
 
 // One progress ring (Tarefas / Foco / Agua).
 function Ring({ pct, color, letter, label }) {
@@ -123,7 +124,7 @@ function SortableTask({ task, onToggle, onDelete, onEdit, onFocus }) {
   );
 }
 
-export default function Hoje({ state, updateState, onAddTask, onEditTask, onGenerateRoutine, onFocusTask }) {
+export default function Hoje({ state, updateState, userId, onAddTask, onEditTask, onGenerateRoutine, onFocusTask }) {
   const today = getDateKey();
   const stats = useMemo(() => computeStats(state), [state]);
   const sensors = useSensors(
@@ -205,6 +206,9 @@ export default function Hoje({ state, updateState, onAddTask, onEditTask, onGene
     <div className="section-gap animate-in">
       {/* Gamification: streak, level, XP, daily rings */}
       <GameHeader stats={stats} />
+
+      {/* Today's classes → mark presente/faltei */}
+      <AulasHoje state={state} updateState={updateState} userId={userId} />
 
       {/* Summary with aria-live */}
       <div className="card flex items-center justify-between" aria-live="polite">

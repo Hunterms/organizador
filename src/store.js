@@ -10,6 +10,7 @@ const defaultState = {
   water: {},
   homeRoutine: {},
   customRooms: [],
+  attendance: [],
   studySessions: [],
   pomodoroSettings: { focusDuration: 25, shortBreak: 5, longBreak: 15, sessionsBeforeLong: 4 },
   settings: { weight: 78, bottleSize: 700, waterGoal: 2730 },
@@ -49,6 +50,7 @@ export async function fetchAllData(userId) {
     { data: homeRoutine },
     { data: customRooms },
     { data: kanbanCards },
+    { data: attendance },
   ] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', userId).single(),
     // Fetch all; we filter dismissed out client-side below so the app still
@@ -62,6 +64,7 @@ export async function fetchAllData(userId) {
     supabase.from('home_routine').select('*').eq('user_id', userId),
     supabase.from('custom_rooms').select('*').eq('user_id', userId),
     supabase.from('kanban_cards').select('*').eq('user_id', userId).order('position'),
+    supabase.from('attendance').select('*').eq('user_id', userId),
   ]);
 
   // Water as map { 'YYYY-MM-DD': bottles }
@@ -107,9 +110,14 @@ export async function fetchAllData(userId) {
     // classroom_course_id lets the UI know this came from Classroom import
     // and should be soft-dismissed instead of hard-deleted.
     classroom_course_id: s.classroom_course_id,
+    class_schedule: s.class_schedule || [],
     topics: topicsBySubject[s.id] || [],
     exams: examsBySubject[s.id] || [],
     assignments: [],
+  }));
+
+  const attendanceFormatted = (attendance || []).map(a => ({
+    id: a.id, subjectId: a.subject_id, date: a.date, status: a.status,
   }));
 
   // Kanban by column
@@ -144,6 +152,7 @@ export async function fetchAllData(userId) {
     subjects: subjectsWithChildren,
     kanban,
     water,
+    attendance: attendanceFormatted,
     homeRoutine: routineMap,
     customRooms: (customRooms || []).map(r => ({ key: r.key, label: r.label, icon: r.icon, color: r.color })),
     studySessions: studySessionsFormatted,
@@ -302,6 +311,41 @@ export async function updateExam(examId, updates) {
   if ('date' in updates) dbUpdates.date = updates.date;
   const { error } = await supabase.from('exams').update(dbUpdates).eq('id', examId);
   if (error) throw error;
+}
+
+// ── Class schedule + attendance ──────────────────────────────────────────
+// Weekly schedule lives on the subject as jsonb: [{ day:0-6, time:'HH:MM', duration, room }]
+export async function updateClassSchedule(subjectId, schedule) {
+  const { error } = await supabase.from('subjects').update({ class_schedule: schedule }).eq('id', subjectId);
+  if (error) throw error;
+}
+
+// Attendance record for one class day. Upsert on (user_id, subject_id, date).
+export async function setAttendance(userId, subjectId, date, status) {
+  const { data, error } = await supabase.from('attendance')
+    .upsert({ user_id: userId, subject_id: subjectId, date, status }, { onConflict: 'user_id,subject_id,date' })
+    .select().single();
+  if (error) throw error;
+  return { id: data.id, subjectId, date, status };
+}
+
+export async function deleteAttendance(userId, subjectId, date) {
+  const { error } = await supabase.from('attendance')
+    .delete().eq('user_id', userId).eq('subject_id', subjectId).eq('date', date);
+  if (error) throw error;
+}
+
+// Attendance summary for a subject: absences, planned classes, and the
+// max misses allowed under Unicamp's 75% rule. SEMESTER_WEEKS is an estimate.
+const SEMESTER_WEEKS = 16;
+export function attendanceSummary(subject, attendance) {
+  const slots = (subject.class_schedule || []).length;
+  const totalPlanned = slots * SEMESTER_WEEKS;
+  const maxMisses = Math.floor(totalPlanned * 0.25);
+  const records = (attendance || []).filter(a => a.subjectId === subject.id);
+  const absences = records.filter(a => a.status === 'absent').length;
+  const presents = records.filter(a => a.status === 'present').length;
+  return { slots, totalPlanned, maxMisses, absences, presents, remaining: Math.max(0, maxMisses - absences) };
 }
 
 // Study sessions
