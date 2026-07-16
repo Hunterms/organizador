@@ -22,6 +22,19 @@ export function isStandalone() {
   );
 }
 
+// iOS / iPadOS. Desktop (Mac/Windows) and Android don't need the home-screen
+// install to receive push — only iOS does.
+export function isIOS() {
+  const ua = navigator.userAgent || '';
+  return /iphone|ipad|ipod/i.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS
+}
+
+// Only iOS requires installing to the home screen before push can be enabled.
+export function needsHomeScreen() {
+  return isIOS() && !isStandalone();
+}
+
 // Register the service worker. Safe to call on every load.
 export async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return null;
@@ -55,7 +68,7 @@ export async function getPushState() {
 export async function enablePush(userId) {
   if (!pushSupported()) return { ok: false, reason: 'unsupported' };
   if (!VAPID_PUBLIC_KEY) return { ok: false, reason: 'no-vapid-key' };
-  if (!isStandalone()) return { ok: false, reason: 'not-installed' };
+  if (isIOS() && !isStandalone()) return { ok: false, reason: 'not-installed' };
 
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return { ok: false, reason: 'denied' };

@@ -14,7 +14,7 @@ import {
   Home, Droplets, Brain, Timer, Plus, X, LogOut, Loader2, ChevronRight,
   Bell, BellRing, Smartphone, Moon
 } from 'lucide-react';
-import { getPushState, enablePush, disablePush, isStandalone, pushSupported } from './lib/push';
+import { getPushState, enablePush, disablePush, needsHomeScreen, pushSupported } from './lib/push';
 import { supabase } from './lib/supabase';
 
 const tabs = [
@@ -393,7 +393,7 @@ function OrganizadorApp() {
                 <p className="text-[11px] text-zinc-500 leading-relaxed">
                   Esse navegador nao suporta notificacoes push.
                 </p>
-              ) : !isStandalone() ? (
+              ) : needsHomeScreen() ? (
                 <div className="flex items-start gap-2">
                   <Smartphone size={14} className="text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
                   <p className="text-[11px] text-zinc-400 leading-relaxed">
