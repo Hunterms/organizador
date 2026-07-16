@@ -74,59 +74,64 @@ function SortableTask({ task, onToggle, onDelete, onEdit, onFocus, onGuide }) {
 
   return (
     <div ref={setNodeRef} style={style}
-      className={`card-sm border-l-[3px] ${catBorder[task.category] || 'border-l-zinc-700'} flex items-center gap-2 transition-colors ${task.done ? 'opacity-40' : ''}`}>
-      <button {...attributes} {...listeners}
-        aria-label={`Arrastar tarefa ${task.title}`}
-        className="drag-handle text-zinc-700 hover:text-zinc-500 shrink-0 -ml-2 min-w-[36px] min-h-[36px] flex items-center justify-center">
-        <GripVertical size={14} aria-hidden="true" />
-      </button>
-      {gated ? (
-        <div className="min-w-[36px] min-h-[36px] flex items-center justify-center shrink-0"
-          title={`Faca ${task.required_pomodoros} pomodoro(s) pra concluir`}>
-          <span className="px-1.5 h-[22px] rounded-full bg-amber-500/15 text-amber-300 text-[10px] font-semibold flex items-center gap-0.5 tabular-nums">
-            🍅 {task.pomodoros_done || 0}/{task.required_pomodoros}
-          </span>
-        </div>
-      ) : (
-        <button onClick={() => onToggle(task.id)}
-          aria-label={task.done ? `Desmarcar ${task.title}` : `Marcar ${task.title} como feita`}
-          aria-pressed={task.done}
-          className={`min-w-[36px] min-h-[36px] flex items-center justify-center shrink-0 transition-colors`}>
-          <span className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${task.done ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-700 hover:border-indigo-400'}`}>
-            {task.done && <Check size={11} className="text-white" aria-hidden="true" />}
-          </span>
+      className={`card-sm border-l-[3px] ${catBorder[task.category] || 'border-l-zinc-700'} flex flex-col gap-2 transition-colors ${task.done ? 'opacity-40' : ''}`}>
+      {/* Row 1: drag + check + title */}
+      <div className="flex items-start gap-2">
+        <button {...attributes} {...listeners}
+          aria-label={`Arrastar tarefa ${task.title}`}
+          className="drag-handle text-zinc-700 hover:text-zinc-500 shrink-0 -ml-2 min-w-[32px] min-h-[32px] flex items-center justify-center">
+          <GripVertical size={14} aria-hidden="true" />
         </button>
-      )}
-      <div className="flex-1 min-w-0">
-        <p className={`text-[13px] leading-snug ${task.done ? 'line-through text-zinc-600' : 'text-zinc-200'}`}>{task.title}</p>
-        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-          {task.time && <span className="text-[10px] text-zinc-600 flex items-center gap-0.5"><Clock size={9} aria-hidden="true" /> {task.time}</span>}
-          <span className={`tag tag-${task.category} capitalize`}>{task.category}</span>
-          <span className={`effort effort-${task.effort}`}>{effortLabel[task.effort] || '30m'}</span>
+        {gated ? (
+          <div className="min-w-[32px] min-h-[32px] flex items-center justify-center shrink-0"
+            title={`Faca ${task.required_pomodoros} pomodoro(s) pra concluir`}>
+            <span className="px-1.5 h-[22px] rounded-full bg-amber-500/15 text-amber-300 text-[10px] font-semibold flex items-center gap-0.5 tabular-nums">
+              🍅 {task.pomodoros_done || 0}/{task.required_pomodoros}
+            </span>
+          </div>
+        ) : (
+          <button onClick={() => onToggle(task.id)}
+            aria-label={task.done ? `Desmarcar ${task.title}` : `Marcar ${task.title} como feita`}
+            aria-pressed={task.done}
+            className="min-w-[32px] min-h-[32px] flex items-center justify-center shrink-0 transition-colors">
+            <span className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${task.done ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-700 hover:border-indigo-400'}`}>
+              {task.done && <Check size={11} className="text-white" aria-hidden="true" />}
+            </span>
+          </button>
+        )}
+        <p className={`text-[13px] leading-snug flex-1 min-w-0 break-words pt-1.5 ${task.done ? 'line-through text-zinc-600' : 'text-zinc-200'}`}>{task.title}</p>
+      </div>
+
+      {/* Row 2: tags + actions */}
+      <div className="flex items-center gap-1.5 flex-wrap pl-1">
+        {task.time && <span className="text-[10px] text-zinc-600 flex items-center gap-0.5"><Clock size={9} aria-hidden="true" /> {task.time}</span>}
+        <span className={`tag tag-${task.category} capitalize`}>{task.category}</span>
+        <span className={`effort effort-${task.effort}`}>{effortLabel[task.effort] || '30m'}</span>
+        <div className="ml-auto flex items-center gap-0.5">
+          {task.guide_id && onGuide && (
+            <button onClick={() => onGuide(task.guide_id)} aria-label={`Abrir guia de ${task.title}`}
+              className="text-indigo-400 hover:text-indigo-300 transition-colors shrink-0 min-w-[34px] min-h-[34px] flex items-center justify-center">
+              <BookOpen size={14} aria-hidden="true" />
+            </button>
+          )}
+          {gated && onFocus && (
+            <button onClick={() => onFocus(task)} aria-label={`Focar em ${task.title}`}
+              className="text-amber-400 hover:text-amber-300 transition-colors shrink-0 min-w-[34px] min-h-[34px] flex items-center justify-center">
+              <Play size={13} aria-hidden="true" />
+            </button>
+          )}
+          {onEdit && (
+            <button onClick={() => onEdit(task)} aria-label={`Editar ${task.title}`}
+              className="text-zinc-700 hover:text-indigo-400 transition-colors shrink-0 min-w-[34px] min-h-[34px] flex items-center justify-center">
+              <Pencil size={13} aria-hidden="true" />
+            </button>
+          )}
+          <button onClick={() => onDelete(task.id)} aria-label={`Deletar ${task.title}`}
+            className="text-zinc-700 hover:text-red-400 transition-colors shrink-0 min-w-[34px] min-h-[34px] flex items-center justify-center">
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
         </div>
       </div>
-      {task.guide_id && onGuide && (
-        <button onClick={() => onGuide(task.guide_id)} aria-label={`Abrir guia de ${task.title}`}
-          className="text-indigo-400 hover:text-indigo-300 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
-          <BookOpen size={14} aria-hidden="true" />
-        </button>
-      )}
-      {gated && onFocus && (
-        <button onClick={() => onFocus(task)} aria-label={`Focar em ${task.title}`}
-          className="text-amber-400 hover:text-amber-300 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
-          <Play size={13} aria-hidden="true" />
-        </button>
-      )}
-      {onEdit && (
-        <button onClick={() => onEdit(task)} aria-label={`Editar ${task.title}`}
-          className="text-zinc-700 hover:text-indigo-400 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
-          <Pencil size={13} aria-hidden="true" />
-        </button>
-      )}
-      <button onClick={() => onDelete(task.id)} aria-label={`Deletar ${task.title}`}
-        className="text-zinc-700 hover:text-red-400 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
-        <Trash2 size={14} aria-hidden="true" />
-      </button>
     </div>
   );
 }
@@ -228,8 +233,8 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
       {isToday && <AulasHoje state={state} updateState={updateState} userId={userId} />}
 
       {/* Day selector — pick a day to work (today or ahead) */}
-      <div className="overflow-x-auto no-scrollbar -mx-1">
-        <div className="flex gap-2 px-1">
+      <div className="overflow-x-auto no-scrollbar py-1.5 -mx-1 px-1">
+        <div className="flex gap-2">
           {dayStrip.map((d) => {
             const key = getDateKey(d);
             const sel = key === selectedDate;
