@@ -14,11 +14,13 @@ import AIPanel from './components/AIPanel';
 import {
   CalendarCheck, CalendarDays, GraduationCap, Briefcase,
   Home, Droplets, Brain, Timer, Plus, X, LogOut, Loader2,
-  CalendarPlus, CheckCircle2, AlertCircle, RefreshCw
+  CalendarPlus, CheckCircle2, AlertCircle, RefreshCw, Bell, BellRing, Smartphone
 } from 'lucide-react';
 import { useGoogleCalendar } from './lib/useGoogleCalendar';
 import { useMoodle } from './lib/useMoodle';
 import { useWorkCalendar } from './lib/useWorkCalendar';
+import { getPushState, enablePush, disablePush, isStandalone, pushSupported } from './lib/push';
+import { supabase } from './lib/supabase';
 
 const tabs = [
   { id: 'hoje', label: 'Hoje', icon: CalendarCheck },
@@ -113,6 +115,40 @@ function OrganizadorApp() {
       if (created.length) setState(prev => ({ ...prev, tasks: [...prev.tasks, ...created] }));
     } catch (e) { console.error('generateRoutine failed:', e); }
   }, [user, state]);
+
+  // ── Push notifications ───────────────────────────────────────────────
+  const [push, setPush] = useState({ supported: pushSupported(), permission: 'default', subscribed: false });
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMsg, setPushMsg] = useState('');
+  useEffect(() => { if (showMenu) getPushState().then(setPush).catch(() => {}); }, [showMenu]);
+
+  const handleEnablePush = async () => {
+    setPushBusy(true); setPushMsg('');
+    const r = await enablePush(user.id);
+    if (!r.ok) {
+      const m = {
+        'not-installed': 'Instale o app na tela de inicio primeiro: Compartilhar → Adicionar a Tela de Inicio. Depois abra pelo icone.',
+        'denied': 'Permissao negada. Libere em Ajustes → Organizador → Notificacoes.',
+        'unsupported': 'Esse navegador nao suporta push.',
+        'no-vapid-key': 'Falta configurar a chave VAPID no deploy.',
+        'save-failed': 'Nao consegui salvar a inscricao. Tenta de novo.',
+      };
+      setPushMsg(m[r.reason] || 'Nao rolou. Tenta de novo.');
+    }
+    setPush(await getPushState());
+    setPushBusy(false);
+  };
+  const handleTestPush = async () => {
+    setPushBusy(true); setPushMsg('');
+    const { error } = await supabase.functions.invoke('send-push', { body: { test: true } });
+    setPushMsg(error ? 'Falha ao enviar teste.' : 'Teste enviado. Deve chegar em segundos.');
+    setPushBusy(false);
+  };
+  const handleDisablePush = async () => {
+    setPushBusy(true); setPushMsg('');
+    await disablePush(user.id);
+    setPush(await getPushState()); setPushBusy(false);
+  };
 
   const resetTaskForm = () => {
     setEditingId(null);
@@ -514,6 +550,56 @@ function OrganizadorApp() {
                   <AlertCircle size={12} className="text-red-400 shrink-0 mt-0.5" aria-hidden="true" />
                   <p className="text-[11px] text-red-300 leading-relaxed">{moodle.error}</p>
                 </div>
+              )}
+            </div>
+
+            {/* Push notifications */}
+            <div className="card-inner mb-6">
+              <p className="text-xs font-semibold text-zinc-300 flex items-center gap-2 mb-4">
+                <Bell size={14} className="text-indigo-400" aria-hidden="true" /> Notificacoes
+              </p>
+              {!push.supported ? (
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  Esse navegador nao suporta notificacoes push.
+                </p>
+              ) : !isStandalone() ? (
+                <div className="flex items-start gap-2">
+                  <Smartphone size={14} className="text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Pra receber push no iPhone, instale o app: toque em <span className="text-zinc-200">Compartilhar</span> no
+                    Safari → <span className="text-zinc-200">Adicionar a Tela de Inicio</span>. Depois abra pelo icone e volte aqui.
+                  </p>
+                </div>
+              ) : push.subscribed ? (
+                <>
+                  <div className="flex items-center gap-2 mb-4">
+                    <BellRing size={14} className="text-green-400 shrink-0" aria-hidden="true" />
+                    <p className="text-xs text-zinc-300">Ativado neste aparelho</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={handleTestPush} disabled={pushBusy}
+                      className="flex-1 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 rounded-xl min-h-[44px] text-xs font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
+                      {pushBusy ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : 'Enviar teste'}
+                    </button>
+                    <button onClick={handleDisablePush} disabled={pushBusy}
+                      className="flex-1 bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 rounded-xl min-h-[44px] text-xs font-medium transition-colors disabled:opacity-50">
+                      Desativar
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
+                    Lembretes de rotina, tarefas com horario e provas direto no aparelho.
+                  </p>
+                  <button onClick={handleEnablePush} disabled={pushBusy}
+                    className="w-full bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors text-xs flex items-center justify-center gap-2">
+                    {pushBusy ? <><Loader2 size={13} className="animate-spin" aria-hidden="true" /> Ativando</> : <><Bell size={13} aria-hidden="true" /> Ativar notificacoes</>}
+                  </button>
+                </>
+              )}
+              {pushMsg && (
+                <p className="text-[11px] text-zinc-400 leading-relaxed mt-3 bg-zinc-800/50 rounded-lg p-2.5">{pushMsg}</p>
               )}
             </div>
 
