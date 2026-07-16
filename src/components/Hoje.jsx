@@ -53,7 +53,7 @@ function SortableTask({ task, onToggle, onDelete, onEdit }) {
   );
 }
 
-export default function Hoje({ state, updateState, onAddTask, onEditTask }) {
+export default function Hoje({ state, updateState, onAddTask, onEditTask, onGenerateRoutine }) {
   const today = getDateKey();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -113,18 +113,6 @@ export default function Hoje({ state, updateState, onAddTask, onEditTask }) {
     op.catch(e => console.error(isImport ? 'dismissTask sync failed:' : 'deleteTask sync failed:', e));
   };
 
-  const generateHomeTasks = () => {
-    const dow = new Date().getDay();
-    const existing = new Set(todayTasks.map(t => t.title.toLowerCase()));
-    const labels = { areia_gato:'Limpar areia do gato', comida_gato:'Dar comida pro gato', sala:'Limpar sala', quarto:'Arrumar quarto', escritorio:'Organizar escritorio', banheiro:'Limpar banheiro', lavanderia:'Lavar roupas', lixo_organico:'Descer lixo organico', lixo_reciclavel:'Descer lixo reciclavel' };
-    const add = [];
-    Object.entries(state.homeRoutine).forEach(([k, c]) => {
-      if (c.days.includes(dow) && !existing.has(labels[k]?.toLowerCase()))
-        add.push({ id: Date.now().toString()+k, title: labels[k], category:'casa', effort:'30', time:'', done:false, date:today, recurring:true });
-    });
-    if (add.length) updateState(p => ({ ...p, tasks: [...p.tasks, ...add] }));
-  };
-
   const addReviewTasks = () => {
     const existing = new Set(todayTasks.map(t => t.title.toLowerCase()));
     const add = todayReviews.filter(r => !existing.has(`revisar ${r.subjectName}`.toLowerCase()))
@@ -181,7 +169,7 @@ export default function Hoje({ state, updateState, onAddTask, onEditTask }) {
 
       {/* Actions */}
       <div className="flex gap-3">
-        <button onClick={generateHomeTasks}
+        <button onClick={onGenerateRoutine}
           className="flex-1 card-sm !py-3 flex items-center justify-center gap-2 text-[13px] text-zinc-400 hover:text-zinc-200 hover:bg-[#1f1f23] transition-colors">
           <Sparkles size={14} className="text-pink-400" aria-hidden="true" /> Rotina casa
         </button>
