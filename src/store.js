@@ -99,6 +99,8 @@ export async function fetchAllData(userId) {
     if (!examsBySubject[e.subject_id]) examsBySubject[e.subject_id] = [];
     examsBySubject[e.subject_id].push({
       id: e.id, name: e.name, date: e.date, google_event_id: e.google_event_id,
+      type: e.type || 'prova', status: e.status || 'pendente',
+      grade: e.grade == null ? null : Number(e.grade),
     });
   });
 
@@ -111,6 +113,7 @@ export async function fetchAllData(userId) {
     // and should be soft-dismissed instead of hard-deleted.
     classroom_course_id: s.classroom_course_id,
     class_schedule: s.class_schedule || [],
+    grade_formula: s.grade_formula || '',
     topics: topicsBySubject[s.id] || [],
     exams: examsBySubject[s.id] || [],
     assignments: [],
@@ -238,6 +241,7 @@ export async function updateSubject(subjectId, updates) {
   if ('name' in updates) dbUpdates.name = updates.name;
   if ('code' in updates) dbUpdates.code = updates.code;
   if ('syllabus' in updates) dbUpdates.syllabus = updates.syllabus;
+  if ('grade_formula' in updates) dbUpdates.grade_formula = updates.grade_formula;
   const { error } = await supabase.from('subjects').update(dbUpdates).eq('id', subjectId);
   if (error) throw error;
 }
@@ -304,10 +308,16 @@ export async function createRetrievalAttempt(userId, attempt) {
 // Exams
 export async function createExam(userId, subjectId, exam) {
   const { data, error } = await supabase.from('exams').insert({
-    user_id: userId, subject_id: subjectId, name: exam.name, date: exam.date,
+    user_id: userId, subject_id: subjectId, name: exam.name, date: exam.date || null,
+    type: exam.type || 'prova', status: exam.status || 'pendente',
+    grade: exam.grade == null ? null : exam.grade,
   }).select().single();
   if (error) throw error;
-  return { id: data.id, name: exam.name, date: exam.date };
+  return {
+    id: data.id, name: exam.name, date: exam.date,
+    type: exam.type || 'prova', status: exam.status || 'pendente',
+    grade: exam.grade == null ? null : exam.grade,
+  };
 }
 
 export async function deleteExam(examId) {
@@ -318,7 +328,10 @@ export async function deleteExam(examId) {
 export async function updateExam(examId, updates) {
   const dbUpdates = {};
   if ('name' in updates) dbUpdates.name = updates.name;
-  if ('date' in updates) dbUpdates.date = updates.date;
+  if ('date' in updates) dbUpdates.date = updates.date || null;
+  if ('type' in updates) dbUpdates.type = updates.type;
+  if ('status' in updates) dbUpdates.status = updates.status;
+  if ('grade' in updates) dbUpdates.grade = updates.grade === '' || updates.grade == null ? null : Number(updates.grade);
   const { error } = await supabase.from('exams').update(dbUpdates).eq('id', examId);
   if (error) throw error;
 }
