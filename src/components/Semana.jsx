@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, AlertTriangle, Clock, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertTriangle, Clock, Calendar, BookOpen } from 'lucide-react';
 import { generateReviewSchedule, getDateKey } from '../store';
+import GuideViewer from './GuideViewer';
 
 function urgencyMeta(d) {
   if (d < 7) return { label: 'Urgente', cls: 'urgency-high', Icon: AlertTriangle };
@@ -33,6 +34,7 @@ const dateKey = getDateKey;
 
 export default function Semana({ state }) {
   const [weekOffset, setWeekOffset] = useState(0);
+  const [guideId, setGuideId] = useState(null);
   // Start focused on today so the "Hoje" panel is visible without a click.
   // Only resets when the user explicitly picks another day.
   const [selectedDay, setSelectedDay] = useState(() => new Date());
@@ -180,16 +182,24 @@ export default function Semana({ state }) {
             selectedDayTasks.map(task => (
               <div key={task.id} className="card-inner !p-3 flex items-center gap-3">
                 <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${categoryDotColors[task.category] || 'bg-zinc-600'}`} />
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <p className={`text-sm ${task.done ? 'line-through text-zinc-500' : 'text-white'}`}>{task.title}</p>
                   {task.time && <p className="text-[11px] text-zinc-500 mt-0.5">{task.time}</p>}
                 </div>
-                <span className={`tag tag-${task.category} capitalize`}>{task.category}</span>
+                {task.guide_id && (
+                  <button onClick={() => setGuideId(task.guide_id)} aria-label={`Abrir guia de ${task.title}`}
+                    className="text-indigo-400 hover:text-indigo-300 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
+                    <BookOpen size={15} aria-hidden="true" />
+                  </button>
+                )}
+                <span className={`tag tag-${task.category} capitalize shrink-0`}>{task.category}</span>
               </div>
             ))
           )}
         </div>
       )}
+
+      {guideId && <GuideViewer guideId={guideId} onClose={() => setGuideId(null)} />}
     </div>
   );
 }
