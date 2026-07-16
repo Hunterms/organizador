@@ -39,6 +39,34 @@ const DEFAULT_ROOM_LABELS: Record<string, string> = {
 };
 const REVIEW_OFFSETS = [-18, -7, -5, -3, -2];
 
+// A task counts as done only when checked AND its pomodoro requirement is met.
+const effDone = (t: { done?: boolean; required_pomodoros?: number; pomodoros_done?: number }) =>
+  !!t.done && ((t.required_pomodoros || 0) === 0 || (t.pomodoros_done || 0) >= (t.required_pomodoros || 0));
+
+// Consecutive days meeting the 80% rule (mirror of lib/gamification.js).
+function streakOf(tasks: Array<{ date?: string; done?: boolean; required_pomodoros?: number; pomodoros_done?: number }>, today: string) {
+  const byDate: Record<string, { total: number; done: number }> = {};
+  for (const t of tasks) {
+    if (!t.date) continue;
+    (byDate[t.date] ||= { total: 0, done: 0 }).total++;
+    if (effDone(t)) byDate[t.date].done++;
+  }
+  const dates = Object.keys(byDate);
+  if (!dates.length) return 0;
+  const earliest = dates.sort()[0];
+  const prev = (s: string) => { const x = new Date(s + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
+  let streak = 0, d = today;
+  while (d >= earliest) {
+    const r = byDate[d];
+    if (!r) { d = prev(d); continue; }
+    const won = r.done / r.total >= 0.8;
+    if (won) { streak++; d = prev(d); continue; }
+    if (d === today) { d = prev(d); continue; }
+    break;
+  }
+  return streak;
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json" } });
 
@@ -126,10 +154,11 @@ async function runDigest(admin: Admin) {
   for (const uid of users) {
     await materializeRoutine(admin, uid, today);
 
-    const { data: tasks } = await admin
-      .from("tasks").select("title").eq("user_id", uid).eq("date", today)
-      .eq("done", false).or("dismissed.is.null,dismissed.eq.false");
-    const taskCount = (tasks ?? []).length;
+    const { data: allTasks } = await admin
+      .from("tasks").select("date, done, dismissed, required_pomodoros, pomodoros_done").eq("user_id", uid);
+    const active = (allTasks ?? []).filter((t: { dismissed?: boolean }) => !t.dismissed);
+    const taskCount = active.filter((t: { date?: string; done?: boolean }) => t.date === today && !t.done).length;
+    const streak = streakOf(active, today);
 
     const { data: exams } = await admin
       .from("exams").select("name, date, subjects(name)").eq("user_id", uid);
@@ -150,8 +179,9 @@ async function runDigest(admin: Admin) {
     if (examSoon) parts.push(`prova de ${examSoon.name} ${examSoon.d === 0 ? "hoje" : `em ${examSoon.d}d`}`);
     if (!parts.length) continue; // nothing to say → no ping
 
+    const body = parts.join(" · ") + (streak > 0 ? ` · 🔥 ${streak}d` : "");
     const res = await deliver(admin, [uid], {
-      title: "Bom dia!", body: parts.join(" · "), url: "/", tag: "digest",
+      title: "Bom dia!", body, url: "/", tag: "digest",
     });
     delivered += res.sent;
   }

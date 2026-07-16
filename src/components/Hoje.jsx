@@ -3,17 +3,72 @@ import {
   getDateKey, getTodayReviews,
   updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb,
 } from '../store';
-import { Check, Clock, Sparkles, Trash2, ClipboardList, BookOpen, GripVertical, Pencil } from 'lucide-react';
+import { Check, Clock, Sparkles, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { computeStats, pomodoroGated } from '../lib/gamification';
+
+// One progress ring (Tarefas / Foco / Agua).
+function Ring({ pct, color, letter, label }) {
+  const r = 17, c = 2 * Math.PI * r, off = c - (Math.min(100, pct) / 100) * c;
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <div className="relative w-12 h-12">
+        <svg viewBox="0 0 44 44" className="w-full h-full -rotate-90" aria-hidden="true">
+          <circle cx="22" cy="22" r={r} fill="none" stroke="#27272a" strokeWidth="4.5" />
+          <circle cx="22" cy="22" r={r} fill="none" stroke={color} strokeWidth="4.5" strokeLinecap="round"
+            strokeDasharray={c} strokeDashoffset={off} className="transition-[stroke-dashoffset] duration-700 ease-out" />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold" style={{ color }}>{letter}</span>
+      </div>
+      <span className="text-[10px] text-zinc-500 tabular-nums">{label}</span>
+    </div>
+  );
+}
+
+function GameHeader({ stats }) {
+  const { streak, atRisk, level, levelProgress, xpIntoLevel, xpForNext, rings } = stats;
+  return (
+    <div className="card space-y-4">
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 shrink-0" aria-label={`Sequencia de ${streak} dias`}>
+          <Flame size={22} className={streak > 0 ? 'text-orange-400' : 'text-zinc-700'} aria-hidden="true" />
+          <div className="leading-none">
+            <p className="text-xl font-bold text-white tabular-nums">{streak}</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">{streak === 1 ? 'dia' : 'dias'}</p>
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[11px] font-semibold text-indigo-300">Nivel {level}</span>
+            <span className="text-[10px] text-zinc-500 tabular-nums">{xpIntoLevel}/{xpForNext} XP</span>
+          </div>
+          <div className="h-2 bg-zinc-800 rounded-full overflow-hidden" role="progressbar"
+            aria-valuenow={Math.round(levelProgress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`Nivel ${level}, ${Math.round(levelProgress * 100)}% pro proximo`}>
+            <div className="h-full bg-indigo-500 rounded-full transition-[width] duration-500 ease-out" style={{ width: `${Math.min(100, levelProgress * 100)}%` }} />
+          </div>
+        </div>
+      </div>
+      {atRisk && streak > 0 && (
+        <p className="text-[11px] text-orange-300/80 bg-orange-500/10 rounded-lg px-3 py-2">Termine 80% das tarefas de hoje pra manter a sequencia.</p>
+      )}
+      <div className="flex justify-around pt-1">
+        <Ring pct={rings.tasks.pct} color="#6366f1" letter="T" label={rings.tasks.label} />
+        <Ring pct={rings.focus.pct} color="#f59e0b" letter="F" label={rings.focus.label} />
+        <Ring pct={rings.water.pct} color="#06b6d4" letter="A" label={rings.water.label} />
+      </div>
+    </div>
+  );
+}
 
 const catBorder = { aula: 'border-l-cyan-500', estudos: 'border-l-violet-500', trabalho: 'border-l-blue-500', terreiro: 'border-l-green-500', pessoal: 'border-l-amber-500', casa: 'border-l-pink-500' };
 const effortLabel = { '5': '5m', '10': '10m', '30': '30m', '60': '1h', '120': '2h+' };
 
-function SortableTask({ task, onToggle, onDelete, onEdit }) {
+function SortableTask({ task, onToggle, onDelete, onEdit, onFocus }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : undefined };
+  const gated = pomodoroGated(task);
 
   return (
     <div ref={setNodeRef} style={style}
@@ -23,14 +78,23 @@ function SortableTask({ task, onToggle, onDelete, onEdit }) {
         className="drag-handle text-zinc-700 hover:text-zinc-500 shrink-0 -ml-2 min-w-[36px] min-h-[36px] flex items-center justify-center">
         <GripVertical size={14} aria-hidden="true" />
       </button>
-      <button onClick={() => onToggle(task.id)}
-        aria-label={task.done ? `Desmarcar ${task.title}` : `Marcar ${task.title} como feita`}
-        aria-pressed={task.done}
-        className={`min-w-[36px] min-h-[36px] flex items-center justify-center shrink-0 transition-colors`}>
-        <span className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${task.done ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-700 hover:border-indigo-400'}`}>
-          {task.done && <Check size={11} className="text-white" aria-hidden="true" />}
-        </span>
-      </button>
+      {gated ? (
+        <div className="min-w-[36px] min-h-[36px] flex items-center justify-center shrink-0"
+          title={`Faca ${task.required_pomodoros} pomodoro(s) pra concluir`}>
+          <span className="px-1.5 h-[22px] rounded-full bg-amber-500/15 text-amber-300 text-[10px] font-semibold flex items-center gap-0.5 tabular-nums">
+            🍅 {task.pomodoros_done || 0}/{task.required_pomodoros}
+          </span>
+        </div>
+      ) : (
+        <button onClick={() => onToggle(task.id)}
+          aria-label={task.done ? `Desmarcar ${task.title}` : `Marcar ${task.title} como feita`}
+          aria-pressed={task.done}
+          className={`min-w-[36px] min-h-[36px] flex items-center justify-center shrink-0 transition-colors`}>
+          <span className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${task.done ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-700 hover:border-indigo-400'}`}>
+            {task.done && <Check size={11} className="text-white" aria-hidden="true" />}
+          </span>
+        </button>
+      )}
       <div className="flex-1 min-w-0">
         <p className={`text-[13px] leading-snug ${task.done ? 'line-through text-zinc-600' : 'text-zinc-200'}`}>{task.title}</p>
         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -39,6 +103,12 @@ function SortableTask({ task, onToggle, onDelete, onEdit }) {
           <span className={`effort effort-${task.effort}`}>{effortLabel[task.effort] || '30m'}</span>
         </div>
       </div>
+      {gated && onFocus && (
+        <button onClick={() => onFocus(task)} aria-label={`Focar em ${task.title}`}
+          className="text-amber-400 hover:text-amber-300 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
+          <Play size={13} aria-hidden="true" />
+        </button>
+      )}
       {onEdit && (
         <button onClick={() => onEdit(task)} aria-label={`Editar ${task.title}`}
           className="text-zinc-700 hover:text-indigo-400 transition-colors shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center">
@@ -53,8 +123,9 @@ function SortableTask({ task, onToggle, onDelete, onEdit }) {
   );
 }
 
-export default function Hoje({ state, updateState, onAddTask, onEditTask, onGenerateRoutine }) {
+export default function Hoje({ state, updateState, onAddTask, onEditTask, onGenerateRoutine, onFocusTask }) {
   const today = getDateKey();
+  const stats = useMemo(() => computeStats(state), [state]);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
@@ -132,6 +203,9 @@ export default function Hoje({ state, updateState, onAddTask, onEditTask, onGene
 
   return (
     <div className="section-gap animate-in">
+      {/* Gamification: streak, level, XP, daily rings */}
+      <GameHeader stats={stats} />
+
       {/* Summary with aria-live */}
       <div className="card flex items-center justify-between" aria-live="polite">
         <div>
@@ -194,7 +268,7 @@ export default function Hoje({ state, updateState, onAddTask, onEditTask, onGene
             <ul className="flex flex-col gap-2.5 list-none" aria-label="Lista de tarefas de hoje">
               {todayTasks.map(task => (
                 <li key={task.id}>
-                  <SortableTask task={task} onToggle={toggleTask} onDelete={deleteTask} onEdit={onEditTask} />
+                  <SortableTask task={task} onToggle={toggleTask} onDelete={deleteTask} onEdit={onEditTask} onFocus={onFocusTask} />
                 </li>
               ))}
             </ul>
