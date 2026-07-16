@@ -165,6 +165,8 @@ export async function fetchAllData(userId) {
       weight: profile?.weight || 78,
       bottleSize: profile?.bottle_size || 700,
       waterGoal: profile?.water_goal || 2730,
+      wakeHour: profile?.wake_hour ?? 7,
+      sleepHour: profile?.sleep_hour ?? 22,
     },
     pomodoroSettings: profile?.pomodoro_settings || defaultState.pomodoroSettings,
   };
@@ -497,6 +499,8 @@ export async function updateProfile(userId, updates) {
   if ('weight' in updates) dbUpdates.weight = updates.weight;
   if ('bottleSize' in updates) dbUpdates.bottle_size = updates.bottleSize;
   if ('waterGoal' in updates) dbUpdates.water_goal = updates.waterGoal;
+  if ('wakeHour' in updates) dbUpdates.wake_hour = updates.wakeHour;
+  if ('sleepHour' in updates) dbUpdates.sleep_hour = updates.sleepHour;
   if ('pomodoroSettings' in updates) dbUpdates.pomodoro_settings = updates.pomodoroSettings;
   const { error } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
   if (error) throw error;

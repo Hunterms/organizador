@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey, ensureTodayRoutineTasks } from './store';
+import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey, ensureTodayRoutineTasks, updateProfile as updateProfileDb } from './store';
 import { buildCircularTask } from './lib/circular';
 import { useAuth } from './lib/auth';
 import Login from './components/Login';
@@ -12,7 +12,7 @@ import AIPanel from './components/AIPanel';
 import {
   CalendarCheck, GraduationCap,
   Home, Droplets, Brain, Timer, Plus, X, LogOut, Loader2, ChevronRight,
-  Bell, BellRing, Smartphone
+  Bell, BellRing, Smartphone, Moon
 } from 'lucide-react';
 import { getPushState, enablePush, disablePush, isStandalone, pushSupported } from './lib/push';
 import { supabase } from './lib/supabase';
@@ -167,6 +167,12 @@ function OrganizadorApp() {
   const focusTask = (task) => {
     setFocusPreselect(`task|${task.id}`);
     setActiveTab('pomodoro');
+  };
+
+  // Sleep schedule (drives the push timing: digest on wake, water while awake).
+  const setSleep = (patch) => {
+    updateState(p => ({ ...p, settings: { ...p.settings, ...patch } }));
+    if (user) updateProfileDb(user.id, patch).catch(e => console.error('sleep sync failed:', e));
   };
 
   // If the task qualifies (category=aula + time set), compute the "pegar
@@ -354,6 +360,28 @@ function OrganizadorApp() {
                   <ChevronRight size={16} className="text-zinc-600 shrink-0" aria-hidden="true" />
                 </button>
               ))}
+            </div>
+
+            {/* Sleep schedule → drives push timing */}
+            <div className="card-inner mb-6">
+              <p className="text-xs font-semibold text-zinc-300 flex items-center gap-2 mb-1">
+                <Moon size={14} className="text-indigo-400" aria-hidden="true" /> Rotina de sono
+              </p>
+              <p className="text-[11px] text-zinc-600 leading-relaxed mb-4">Quando o "bom dia" chega e a janela dos lembretes de agua. Fora disso, silencio.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-[11px] text-zinc-500">Acordo
+                  <select value={state.settings.wakeHour ?? 7} onChange={e => setSleep({ wakeHour: Number(e.target.value) })}
+                    className="input-base mt-1 text-[13px]" aria-label="Hora que acorda">
+                    {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                  </select>
+                </label>
+                <label className="text-[11px] text-zinc-500">Durmo
+                  <select value={state.settings.sleepHour ?? 22} onChange={e => setSleep({ sleepHour: Number(e.target.value) })}
+                    className="input-base mt-1 text-[13px]" aria-label="Hora que dorme">
+                    {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                  </select>
+                </label>
+              </div>
             </div>
 
             {/* Push notifications */}

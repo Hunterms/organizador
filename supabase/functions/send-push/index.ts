@@ -123,6 +123,14 @@ async function subscribedUserIds(admin: Admin): Promise<string[]> {
   return [...new Set((data ?? []).map((r: { user_id: string }) => r.user_id))];
 }
 
+// User's wake/sleep hours (defaults 7/22). Drives when the digest fires and the
+// awake window for water/timed reminders.
+async function sleepPrefs(admin: Admin, uid: string) {
+  const { data } = await admin.from("profiles").select("wake_hour, sleep_hour, water_goal, bottle_size").eq("id", uid).maybeSingle();
+  const d = data as { wake_hour?: number; sleep_hour?: number; water_goal?: number; bottle_size?: number } | null;
+  return { wake: d?.wake_hour ?? 7, sleep: d?.sleep_hour ?? 22, goal: d?.water_goal ?? 0, size: d?.bottle_size ?? 700 };
+}
+
 // Ensure today's home-routine items exist as casa tasks (same as the client
 // does on open — but server-side, so the board is ready each morning).
 async function materializeRoutine(admin: Admin, userId: string, today: string) {
@@ -148,10 +156,13 @@ async function materializeRoutine(admin: Admin, userId: string, today: string) {
 
 // Morning digest: materialize routine, then summarize today for each user.
 async function runDigest(admin: Admin) {
-  const { date: today } = nowLocal();
+  const { date: today, minutes } = nowLocal();
+  const hour = Math.floor(minutes / 60);
   const users = await subscribedUserIds(admin);
   let delivered = 0;
   for (const uid of users) {
+    const { wake } = await sleepPrefs(admin, uid);
+    if (hour !== wake) continue; // so no horario que o user acorda
     await materializeRoutine(admin, uid, today);
 
     const { data: allTasks } = await admin
@@ -191,14 +202,19 @@ async function runDigest(admin: Admin) {
 // Timed reminders: tasks with a time that are due within ~15 min.
 async function runTimed(admin: Admin) {
   const { date: today, minutes: nowMin } = nowLocal();
+  const hour = Math.floor(nowMin / 60);
   const { data: tasks } = await admin
     .from("tasks").select("id, user_id, title, time, category")
     .eq("date", today).eq("done", false).is("reminded_at", null).not("time", "is", null);
+  const prefsCache: Record<string, { wake: number; sleep: number }> = {};
   let delivered = 0;
   for (const t of tasks ?? []) {
     if (!t.time) continue;
     const diff = parseHHMM(t.time) - nowMin;
     if (diff > 15 || diff < -2) continue; // only within the 15-min lead window
+    if (!prefsCache[t.user_id]) { const p = await sleepPrefs(admin, t.user_id); prefsCache[t.user_id] = { wake: p.wake, sleep: p.sleep }; }
+    const { wake, sleep } = prefsCache[t.user_id];
+    if (!(hour >= wake && hour < sleep)) continue; // silencio durante o sono
     const res = await deliver(admin, [t.user_id], {
       title: `Em breve: ${t.title}`, body: `${t.time}${t.category ? " · " + t.category : ""}`, url: "/", tag: `task-${t.id}`,
     });
@@ -206,6 +222,30 @@ async function runTimed(admin: Admin) {
     delivered += res.sent;
   }
   return { job: "timed", delivered };
+}
+
+// Hourly water reminder — only while awake (between the user's wake and sleep
+// hours) and only if the daily goal isn't met yet. Uses tag "water" so it
+// replaces the previous nudge instead of stacking.
+async function runWater(admin: Admin) {
+  const { date, minutes } = nowLocal();
+  const hour = Math.floor(minutes / 60);
+  const users = await subscribedUserIds(admin);
+  let delivered = 0;
+  for (const uid of users) {
+    const { wake, sleep, goal, size } = await sleepPrefs(admin, uid);
+    if (!(hour > wake && hour < sleep)) continue; // so acordado, e o bom dia ja cobre a hora de acordar
+    const { data: wl } = await admin.from("water_logs").select("bottles").eq("user_id", uid).eq("date", date).maybeSingle();
+    const bottles = (wl as { bottles?: number } | null)?.bottles || 0;
+    if (goal && bottles * size >= goal) continue; // meta batida → nao enche o saco
+    const res = await deliver(admin, [uid], {
+      title: "Hora de beber agua 💧",
+      body: goal ? `${Math.round(bottles * size)} / ${goal} ml hoje. Bora mais um gole.` : "Bora um gole de agua.",
+      url: "/", tag: "water",
+    });
+    delivered += res.sent;
+  }
+  return { job: "water", delivered };
 }
 
 Deno.serve(async (req) => {
@@ -226,6 +266,7 @@ Deno.serve(async (req) => {
     if (body.cron && CRON_SECRET && body.cron === CRON_SECRET) {
       if (body.job === "digest") return json(await runDigest(admin));
       if (body.job === "timed") return json(await runTimed(admin));
+      if (body.job === "water") return json(await runWater(admin));
       return json({ error: "unknown job" }, 400);
     }
 
