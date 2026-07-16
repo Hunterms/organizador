@@ -19,6 +19,7 @@ import {
   getTodayReviewQueue, generateInterleavedSession,
   getSubjectInCrunch, buildCrunchPlan,
 } from '../lib/studyMethods';
+import { computeMedia } from '../lib/grades';
 import RetrievalModal from './RetrievalModal';
 
 const statusConfig = {
@@ -101,7 +102,8 @@ export default function Estudos({ state, updateState, userId }) {
   const [examDraft, setExamDraft] = useState({ name: '', date: '' });
   const [editingSubjectId, setEditingSubjectId] = useState(null);
   const [subjectNameDraft, setSubjectNameDraft] = useState('');
-  const [newExam, setNewExam] = useState({ name: '', date: '' });
+  const [newExam, setNewExam] = useState({ name: '', date: '', type: 'prova' });
+  const [formulaDraft, setFormulaDraft] = useState({});
 
   // Retrieval modal state: { topic, subject } when open, null when closed.
   // Also drives the interleaved session (queue of topics to cycle through).
@@ -241,11 +243,11 @@ export default function Estudos({ state, updateState, userId }) {
   };
 
   const addExam = async (sid) => {
-    if (!newExam.name.trim() || !newExam.date) return;
+    if (!newExam.name.trim()) return;
     const tmpId = 'tmp-' + Date.now();
-    const draft = { id: tmpId, name: newExam.name, date: newExam.date };
+    const draft = { id: tmpId, name: newExam.name.trim(), date: newExam.date || null, type: newExam.type, status: 'pendente', grade: null };
     updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id !== sid ? s : { ...s, exams: [...s.exams, draft] }) }));
-    setNewExam({ name: '', date: '' }); setShowAddExam(null);
+    setNewExam({ name: '', date: '', type: newExam.type }); setShowAddExam(null);
     if (!userId || isTmp(sid)) return;
     try {
       const saved = await createExamDb(userId, sid, draft);
@@ -304,6 +306,20 @@ export default function Estudos({ state, updateState, userId }) {
     }) }));
     if (isTmp(examId)) return;
     deleteExamDb(examId).catch(e => console.error('deleteExam sync failed:', e));
+  };
+
+  // Local-only patch (no DB write) — used for the grade input on each keystroke;
+  // the DB write happens on blur.
+  const patchExamState = (sid, examId, patch) => {
+    updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id !== sid ? s : {
+      ...s, exams: s.exams.map(e => e.id === examId ? { ...e, ...patch } : e),
+    }) }));
+  };
+
+  const saveFormula = (sid) => {
+    const f = (formulaDraft[sid] ?? '').trim();
+    updateState(p => ({ ...p, subjects: p.subjects.map(s => s.id === sid ? { ...s, grade_formula: f } : s) }));
+    if (!isTmp(sid)) updateSubjectDb(sid, { grade_formula: f }).catch(e => console.error('saveFormula sync failed:', e));
   };
 
   return (
@@ -530,101 +546,140 @@ export default function Estudos({ state, updateState, userId }) {
                   })()}
                 </div>
 
-                <div className="card-inner">
-                  <div className="flex items-center justify-between mb-5">
-                    <p className="text-xs font-semibold text-zinc-300 flex items-center gap-2"><Calendar size={12} aria-hidden="true" /> Provas</p>
-                    <button onClick={() => setShowAddExam(showAddExam === subject.id ? null : subject.id)}
+                <div className="card-inner space-y-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-zinc-300 flex items-center gap-2"><Calendar size={12} aria-hidden="true" /> Provas &amp; Atividades</p>
+                    <button onClick={() => { setNewExam(p => ({ name: '', date: '', type: p.type || 'prova' })); setShowAddExam(showAddExam === subject.id ? null : subject.id); }}
                       className="text-[11px] text-violet-400 hover:text-violet-300 transition-colors min-h-[36px] px-2">+ Adicionar</button>
                   </div>
+
                   {showAddExam === subject.id && (
-                    <div className="space-y-2 mb-4 animate-in">
-                      <label htmlFor={`exam-name-${subject.id}`} className="sr-only">Nome da prova</label>
-                      <input id={`exam-name-${subject.id}`} autoComplete="off" placeholder="Nome da prova" value={newExam.name} onChange={e => setNewExam(p => ({ ...p, name: e.target.value }))} className="input-base text-[13px]" />
+                    <div className="card-inner space-y-2 animate-in">
+                      <div className="flex gap-1 bg-zinc-800/40 p-1 rounded-lg">
+                        {['prova', 'atividade'].map(tp => (
+                          <button key={tp} onClick={() => setNewExam(p => ({ ...p, type: tp }))}
+                            aria-pressed={newExam.type === tp}
+                            className={`flex-1 min-h-[34px] rounded-md text-[11px] font-medium capitalize transition-colors ${newExam.type === tp ? 'bg-violet-500/25 text-violet-300' : 'text-zinc-500 hover:text-zinc-300'}`}>{tp === 'atividade' ? 'Atividade' : 'Prova'}</button>
+                        ))}
+                      </div>
+                      <input autoComplete="off" placeholder={newExam.type === 'prova' ? 'Nome (ex: P1)' : 'Nome (ex: Atividade 1.1)'} value={newExam.name} onChange={e => setNewExam(p => ({ ...p, name: e.target.value }))} className="input-base text-[13px]" />
                       <div className="flex gap-2">
-                        <label htmlFor={`exam-date-${subject.id}`} className="sr-only">Data da prova</label>
-                        <input id={`exam-date-${subject.id}`} type="date" value={newExam.date} onChange={e => setNewExam(p => ({ ...p, date: e.target.value }))} className="input-base text-[13px] flex-1" />
-                        <button onClick={() => addExam(subject.id)} className="bg-violet-500 text-white px-5 rounded-xl text-xs hover:bg-violet-400 transition-colors min-h-[44px]">OK</button>
+                        <input type="date" value={newExam.date} onChange={e => setNewExam(p => ({ ...p, date: e.target.value }))} className="input-base text-[13px] flex-1" aria-label="Data (opcional)" />
+                        <button onClick={() => addExam(subject.id)} disabled={!newExam.name.trim()} className="bg-violet-500 hover:bg-violet-400 disabled:opacity-30 text-white px-5 rounded-xl text-xs min-h-[44px]">OK</button>
                       </div>
                     </div>
                   )}
-                  {subject.exams.length === 0 && <p className="text-[11px] text-zinc-600">Nenhuma prova cadastrada</p>}
-                  {subject.exams.map((exam, i) => {
-                    const d = Math.ceil((new Date(exam.date) - new Date()) / 86400000);
-                    const reviews = generateReviewSchedule(exam.date);
-                    const u = urgencyMeta(d);
-                    const isEditing = editingExamId === exam.id;
+
+                  {['prova', 'atividade'].map(tp => {
+                    const items = subject.exams.filter(e => (e.type || 'prova') === tp);
                     return (
-                      <div key={exam.id ?? i} className="card-inner mb-2">
-                        {isEditing ? (
-                          <div className="space-y-2 animate-in">
-                            <input autoComplete="off" placeholder="Nome da prova"
-                              value={examDraft.name}
-                              onChange={e => setExamDraft(p => ({ ...p, name: e.target.value }))}
-                              className="input-base text-[13px]" autoFocus />
-                            <div className="flex gap-2">
-                              <input type="date" value={examDraft.date}
-                                onChange={e => setExamDraft(p => ({ ...p, date: e.target.value }))}
-                                className="input-base text-[13px] flex-1" />
-                              <button onClick={() => {
-                                if (!examDraft.name.trim() || !examDraft.date) return;
-                                updateExamLocal(subject.id, exam.id, { name: examDraft.name.trim(), date: examDraft.date });
-                                setEditingExamId(null);
-                              }}
-                                aria-label="Salvar alteracoes"
-                                className="bg-violet-500 hover:bg-violet-400 text-white px-4 rounded-xl text-xs min-h-[44px] flex items-center gap-1.5">
-                                <Check size={13} aria-hidden="true" /> Salvar
-                              </button>
-                              <button onClick={() => setEditingExamId(null)}
-                                aria-label="Cancelar edicao"
-                                className="bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 px-3 rounded-xl text-xs min-h-[44px]">
-                                Cancelar
-                              </button>
+                      <div key={tp}>
+                        <p className="text-[11px] font-medium text-zinc-500 mb-2">{tp === 'prova' ? 'Provas' : 'Atividades'} ({items.length})</p>
+                        {items.length === 0 ? (
+                          <p className="text-[11px] text-zinc-600">Nenhuma cadastrada</p>
+                        ) : items.map((exam) => {
+                          const hasDate = !!exam.date;
+                          const d = hasDate ? Math.ceil((new Date(exam.date) - new Date()) / 86400000) : null;
+                          const u = hasDate ? urgencyMeta(d) : null;
+                          const isEditing = editingExamId === exam.id;
+                          return (
+                            <div key={exam.id} className="card-inner mb-2">
+                              {isEditing ? (
+                                <div className="space-y-2 animate-in">
+                                  <input autoComplete="off" placeholder="Nome" value={examDraft.name}
+                                    onChange={e => setExamDraft(p => ({ ...p, name: e.target.value }))}
+                                    className="input-base text-[13px]" autoFocus />
+                                  <div className="flex gap-2">
+                                    <input type="date" value={examDraft.date}
+                                      onChange={e => setExamDraft(p => ({ ...p, date: e.target.value }))}
+                                      className="input-base text-[13px] flex-1" />
+                                    <button onClick={() => {
+                                      if (!examDraft.name.trim()) return;
+                                      updateExamLocal(subject.id, exam.id, { name: examDraft.name.trim(), date: examDraft.date });
+                                      setEditingExamId(null);
+                                    }} aria-label="Salvar" className="bg-violet-500 hover:bg-violet-400 text-white px-4 rounded-xl text-xs min-h-[44px] flex items-center gap-1.5"><Check size={13} aria-hidden="true" /> Salvar</button>
+                                    <button onClick={() => setEditingExamId(null)} aria-label="Cancelar" className="bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 px-3 rounded-xl text-xs min-h-[44px]">X</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[13px] text-white font-medium flex-1 min-w-0 break-words">{exam.name}</span>
+                                    {hasDate && (
+                                      <span className={`text-xs font-bold shrink-0 inline-flex items-center gap-1 ${u.cls}`}>
+                                        <u.Icon size={11} aria-hidden="true" />
+                                        {new Date(exam.date + 'T12:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} ({d}d)
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                    <button onClick={() => updateExamLocal(subject.id, exam.id, { status: exam.status === 'feita' ? 'pendente' : 'feita' })}
+                                      aria-pressed={exam.status === 'feita'}
+                                      className={`text-[10px] px-2.5 min-h-[32px] rounded-md font-medium transition-colors ${exam.status === 'feita' ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800/60 text-zinc-400'}`}>
+                                      {exam.status === 'feita' ? '✓ feita' : 'pendente'}
+                                    </button>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] text-zinc-600">nota</span>
+                                      <input type="number" step="0.1" inputMode="decimal" placeholder="—"
+                                        value={exam.grade ?? ''}
+                                        onChange={e => patchExamState(subject.id, exam.id, { grade: e.target.value === '' ? null : Number(e.target.value) })}
+                                        onBlur={e => { if (!isTmp(exam.id)) updateExamDb(exam.id, { grade: e.target.value }).catch(err => console.error('grade sync failed:', err)); }}
+                                        className="input-base !py-1 w-16 text-[12px] text-center" aria-label={`Nota de ${exam.name}`} />
+                                    </div>
+                                    <div className="ml-auto flex items-center gap-1">
+                                      <button onClick={() => { setEditingExamId(exam.id); setExamDraft({ name: exam.name, date: exam.date || '' }); }} aria-label={`Editar ${exam.name}`} className="text-zinc-600 hover:text-violet-400 min-w-[32px] min-h-[32px] flex items-center justify-center"><Pencil size={11} aria-hidden="true" /></button>
+                                      <button onClick={() => { if (!confirm(`Remover "${exam.name}"?`)) return; deleteExamLocal(subject.id, exam.id); }} aria-label={`Remover ${exam.name}`} className="text-zinc-600 hover:text-red-400 min-w-[32px] min-h-[32px] flex items-center justify-center"><Trash2 size={11} aria-hidden="true" /></button>
+                                    </div>
+                                  </div>
+                                  {tp === 'prova' && hasDate && (() => {
+                                    const reviews = generateReviewSchedule(exam.date);
+                                    return reviews.length > 0 ? (
+                                      <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                                        <span className="text-[10px] text-zinc-600">Revisoes:</span>
+                                        {reviews.map((r, j) => {
+                                          const today = r === getDateKey();
+                                          return <span key={j} className={`text-[10px] px-2 py-0.5 rounded-md ${today ? 'bg-violet-500/25 text-violet-300 font-bold' : 'bg-zinc-800/60 text-zinc-600'}`}>{new Date(r + 'T12:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}</span>;
+                                        })}
+                                      </div>
+                                    ) : null;
+                                  })()}
+                                </>
+                              )}
                             </div>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[13px] text-white font-medium flex-1 min-w-0 break-words">{exam.name}</span>
-                              <span className={`text-xs font-bold shrink-0 inline-flex items-center gap-1 ${u.cls}`}>
-                                <u.Icon size={11} aria-hidden="true" />
-                                {new Date(exam.date + 'T12:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} ({d}d)
-                                <span className="sr-only"> — {u.label}</span>
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1 mt-1 -mb-1">
-                              <button onClick={() => {
-                                setEditingExamId(exam.id);
-                                setExamDraft({ name: exam.name, date: exam.date });
-                              }}
-                                aria-label={`Editar ${exam.name}`}
-                                className="text-zinc-600 hover:text-violet-400 transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center">
-                                <Pencil size={11} aria-hidden="true" />
-                              </button>
-                              <button onClick={() => {
-                                if (!confirm(`Remover prova "${exam.name}"?`)) return;
-                                deleteExamLocal(subject.id, exam.id);
-                              }}
-                                aria-label={`Remover ${exam.name}`}
-                                className="text-zinc-600 hover:text-red-400 transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center">
-                                <Trash2 size={11} aria-hidden="true" />
-                              </button>
-                            </div>
-                            {reviews.length > 0 && (
-                              <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                                <span className="text-[10px] text-zinc-600">Revisoes:</span>
-                                {reviews.map((r, j) => {
-                                  const today = r === getDateKey();
-                                  return <span key={j} className={`text-[10px] px-2 py-0.5 rounded-md ${today ? 'bg-violet-500/25 text-violet-300 font-bold' : 'bg-zinc-800/60 text-zinc-600'}`}>
-                                    {new Date(r+'T12:00').toLocaleDateString('pt-BR', { day:'numeric', month:'short' })}
-                                  </span>;
-                                })}
-                              </div>
-                            )}
-                          </>
-                        )}
+                          );
+                        })}
                       </div>
                     );
                   })}
+                </div>
+
+                {/* Media da materia */}
+                <div className="card-inner space-y-3">
+                  <p className="text-xs font-semibold text-zinc-300 flex items-center gap-2"><Target size={12} aria-hidden="true" /> Media</p>
+                  <p className="text-[11px] text-zinc-600 leading-relaxed">
+                    Fórmula com <code className="text-zinc-400">P1,P2…</code> (provas), <code className="text-zinc-400">A1,A2…</code> (atividades), <code className="text-zinc-400">media(atividades)</code>, <code className="text-zinc-400">media(provas)</code>. Ex: <code className="text-zinc-400">(P1+P2+media(atividades))/3</code>
+                  </p>
+                  <div className="flex gap-2">
+                    <input autoComplete="off" placeholder="(P1+P2+media(atividades))/3"
+                      value={formulaDraft[subject.id] ?? subject.grade_formula ?? ''}
+                      onChange={e => setFormulaDraft(p => ({ ...p, [subject.id]: e.target.value }))}
+                      className="input-base text-[13px] flex-1" aria-label="Formula da media" />
+                    <button onClick={() => saveFormula(subject.id)} className="bg-violet-500 hover:bg-violet-400 text-white px-4 rounded-xl text-xs min-h-[44px]">Salvar</button>
+                  </div>
+                  {(() => {
+                    const f = formulaDraft[subject.id] ?? subject.grade_formula ?? '';
+                    if (!f.trim()) return null;
+                    const provas = subject.exams.filter(e => (e.type || 'prova') === 'prova');
+                    const ativ = subject.exams.filter(e => e.type === 'atividade');
+                    const r = computeMedia(f, provas, ativ);
+                    return (
+                      <div className="flex items-center justify-between bg-zinc-800/40 rounded-lg px-4 py-3">
+                        <span className="text-[11px] text-zinc-500">Sua media agora</span>
+                        {r.error ? <span className="text-[12px] text-red-400">{r.error}</span>
+                          : <span className="text-2xl font-bold text-white tabular-nums">{r.value != null ? r.value.toFixed(2) : '—'}</span>}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="card-inner">
