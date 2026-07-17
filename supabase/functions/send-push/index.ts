@@ -43,28 +43,37 @@ const REVIEW_OFFSETS = [-18, -7, -5, -3, -2];
 const effDone = (t: { done?: boolean; required_pomodoros?: number; pomodoros_done?: number }) =>
   !!t.done && ((t.required_pomodoros || 0) === 0 || (t.pomodoros_done || 0) >= (t.required_pomodoros || 0));
 
-// Consecutive days meeting the 80% rule (mirror of lib/gamification.js).
-function streakOf(tasks: Array<{ date?: string; done?: boolean; required_pomodoros?: number; pomodoros_done?: number }>, today: string) {
+// Streak with the floor (>=80% tasks OR >=1 focus pomodoro) and 2 shields/month
+// (mirror of lib/gamification.js computeProgress).
+function streakOf(
+  tasks: Array<{ date?: string; done?: boolean; required_pomodoros?: number; pomodoros_done?: number }>,
+  focus: Record<string, number>,
+  today: string,
+) {
   const byDate: Record<string, { total: number; done: number }> = {};
   for (const t of tasks) {
     if (!t.date) continue;
     (byDate[t.date] ||= { total: 0, done: 0 }).total++;
     if (effDone(t)) byDate[t.date].done++;
   }
-  const dates = Object.keys(byDate);
+  const dates = [...Object.keys(byDate), ...Object.keys(focus)];
   if (!dates.length) return 0;
-  const earliest = dates.sort()[0];
-  const prev = (s: string) => { const x = new Date(s + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
-  let streak = 0, d = today;
-  while (d >= earliest) {
+  const kept = (d: string) => {
     const r = byDate[d];
-    if (!r) { d = prev(d); continue; }
-    const won = r.done / r.total >= 0.8;
-    if (won) { streak++; d = prev(d); continue; }
-    if (d === today) { d = prev(d); continue; }
-    break;
+    return (!!r && r.total > 0 && r.done / r.total >= 0.8) || (focus[d] || 0) >= 1;
+  };
+  const start = dates.sort()[0];
+  const next = (s: string) => { const x = new Date(s + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
+  let run = 0, month = "", ms = 0;
+  for (let d = start; d <= today; d = next(d)) {
+    const mo = d.slice(0, 7);
+    if (mo !== month) { month = mo; ms = 0; }
+    if (kept(d)) run++;
+    else if (d === today) { /* in progress */ }
+    else if (ms < 2) ms++;
+    else run = 0;
   }
-  return streak;
+  return run;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -165,11 +174,15 @@ async function runDigest(admin: Admin) {
     if (hour !== wake) continue; // so no horario que o user acorda
     await materializeRoutine(admin, uid, today);
 
-    const { data: allTasks } = await admin
-      .from("tasks").select("date, done, dismissed, required_pomodoros, pomodoros_done").eq("user_id", uid);
+    const [{ data: allTasks }, { data: sessions }] = await Promise.all([
+      admin.from("tasks").select("date, done, dismissed, required_pomodoros, pomodoros_done").eq("user_id", uid),
+      admin.from("study_sessions").select("date, type").eq("user_id", uid).eq("type", "focus"),
+    ]);
     const active = (allTasks ?? []).filter((t: { dismissed?: boolean }) => !t.dismissed);
     const taskCount = active.filter((t: { date?: string; done?: boolean }) => t.date === today && !t.done).length;
-    const streak = streakOf(active, today);
+    const focus: Record<string, number> = {};
+    for (const s of sessions ?? []) if (s.date) focus[s.date] = (focus[s.date] || 0) + 1;
+    const streak = streakOf(active, focus, today);
 
     const { data: exams } = await admin
       .from("exams").select("name, date, subjects(name)").eq("user_id", uid);
