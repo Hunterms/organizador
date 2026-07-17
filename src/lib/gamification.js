@@ -6,6 +6,7 @@ import { getDateKey } from '../store';
 
 const STREAK_THRESHOLD = 0.8;   // 80% of the day's tasks effectively done
 const FOCUS_GOAL_MIN = 50;      // ~2 pomodoros = a "full" focus ring
+const SHIELDS_PER_MONTH = 2;    // auto-saves a missed day, max 2 per calendar month
 const XP = { task: 10, pomodoro: 15, water: 20, retrieval: 25 };
 
 // A task counts as done only when checked AND its pomodoro requirement is met.
@@ -18,46 +19,71 @@ export function pomodoroGated(t) {
   return (t.required_pomodoros || 0) > 0 && (t.pomodoros_done || 0) < t.required_pomodoros;
 }
 
-const prevDay = (s) => {
+const shift = (s, n) => {
   const d = new Date(s + 'T12:00:00Z');
-  d.setUTCDate(d.getUTCDate() - 1);
+  d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 };
+const prevDay = (s) => shift(s, -1);
+const nextDay = (s) => shift(s, 1);
 
-// Consecutive days meeting the 80% rule, walking back from today. Days with no
-// tasks are transparent (grace — they neither break nor extend the streak).
-// Today counts only once it hits 80%; before that the streak reflects the run
-// ending yesterday (today shown separately as "at risk / in progress").
-export function computeStreak(tasks, today = getDateKey()) {
-  const byDate = {};
+function focusByDate(state) {
+  const m = {};
+  for (const s of state.studySessions || []) if (s.type === 'focus') m[s.date] = (m[s.date] || 0) + 1;
+  return m;
+}
+function tasksByDate(tasks) {
+  const m = {};
   for (const t of tasks || []) {
     if (!t.date) continue;
-    (byDate[t.date] ||= { total: 0, done: 0 }).total++;
-    if (effectiveDone(t)) byDate[t.date].done++;
+    (m[t.date] ||= { total: 0, done: 0 }).total++;
+    if (effectiveDone(t)) m[t.date].done++;
   }
-  const dates = Object.keys(byDate);
-  if (!dates.length) return 0;
-  const earliest = dates.sort()[0];
-  let streak = 0;
-  let d = today;
-  while (d >= earliest) {
-    const rec = byDate[d];
-    if (!rec) { d = prevDay(d); continue; }          // no tasks → grace
-    const won = rec.done / rec.total >= STREAK_THRESHOLD;
-    if (won) { streak++; d = prevDay(d); continue; }
-    if (d === today) { d = prevDay(d); continue; }    // today still in progress
-    break;                                            // a past day fell short
-  }
-  return streak;
+  return m;
+}
+// A day is "kept" (counts for the streak) if you did the floor: >=80% of the
+// day's tasks OR at least 1 focus pomodoro. An idle day is a miss.
+function keptDay(byDate, focus, date) {
+  const rec = byDate[date];
+  const tasksOk = rec && rec.total > 0 && rec.done / rec.total >= STREAK_THRESHOLD;
+  return tasksOk || (focus[date] || 0) >= 1;
 }
 
-// True when today has tasks but hasn't hit 80% yet — used to nudge ("finish to
-// keep your streak").
-export function streakAtRisk(tasks, today = getDateKey()) {
-  const todays = (tasks || []).filter((t) => t.date === today);
-  if (!todays.length) return false;
-  const done = todays.filter(effectiveDone).length;
-  return done / todays.length < STREAK_THRESHOLD;
+// Forward scan → current streak, best ever, shields used this month, at-risk.
+// A missed past day is auto-bridged by a shield (max 2 per calendar month);
+// out of shields → the streak breaks. Today never breaks or spends a shield.
+export function computeProgress(state, today = getDateKey()) {
+  const byDate = tasksByDate(state.tasks || []);
+  const focus = focusByDate(state);
+  const dates = [...Object.keys(byDate), ...Object.keys(focus)];
+  const atRisk = !keptDay(byDate, focus, today);
+  if (!dates.length) return { streak: 0, best: 0, shieldsUsed: 0, shieldsLeft: SHIELDS_PER_MONTH, atRisk };
+  const start = dates.sort()[0];
+  const curMonth = today.slice(0, 7);
+  let run = 0, best = 0, curMonthShields = 0, month = null, monthShields = 0;
+  for (let d = start; d <= today; d = nextDay(d)) {
+    const mo = d.slice(0, 7);
+    if (mo !== month) { month = mo; monthShields = 0; }
+    if (keptDay(byDate, focus, d)) { run++; best = Math.max(best, run); }
+    else if (d === today) { /* in progress — don't break or spend a shield */ }
+    else if (monthShields < SHIELDS_PER_MONTH) { monthShields++; } // bridge the gap
+    else { run = 0; }
+    if (mo === curMonth) curMonthShields = monthShields;
+  }
+  return { streak: run, best, shieldsUsed: curMonthShields, shieldsLeft: SHIELDS_PER_MONTH - curMonthShields, atRisk };
+}
+
+// Focus pomodoros + tasks done per day for the last N days (for the chart).
+export function dailyActivity(state, days = 21, today = getDateKey()) {
+  const focus = focusByDate(state);
+  const byDate = tasksByDate(state.tasks || []);
+  const out = [];
+  let d = today;
+  for (let i = 0; i < days; i++) {
+    out.unshift({ date: d, pomodoros: focus[d] || 0, done: byDate[d]?.done || 0, kept: keptDay(byDate, focus, d) });
+    d = prevDay(d);
+  }
+  return out;
 }
 
 const xpForLevel = (lvl) => 50 * lvl * (lvl - 1); // L1:0 L2:100 L3:300 L4:600 ...
@@ -86,6 +112,7 @@ export function computeStats(state, today = getDateKey()) {
   const level = levelForXp(xp);
   const cur = xpForLevel(level);
   const next = xpForLevel(level + 1);
+  const prog = computeProgress(state, today);
 
   return {
     xp,
@@ -93,8 +120,11 @@ export function computeStats(state, today = getDateKey()) {
     xpIntoLevel: xp - cur,
     xpForNext: next - cur,
     levelProgress: (xp - cur) / (next - cur),
-    streak: computeStreak(tasks, today),
-    atRisk: streakAtRisk(tasks, today),
+    streak: prog.streak,
+    best: prog.best,
+    shieldsLeft: prog.shieldsLeft,
+    shieldsUsed: prog.shieldsUsed,
+    atRisk: prog.atRisk,
     rings: computeRings(state, today),
   };
 }

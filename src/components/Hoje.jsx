@@ -3,13 +3,14 @@ import {
   getDateKey, getTodayReviews,
   updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb,
 } from '../store';
-import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play } from 'lucide-react';
+import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play, Shield, ChevronRight } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { computeStats, pomodoroGated } from '../lib/gamification';
 import AulasHoje from './AulasHoje';
 import GuideViewer from './GuideViewer';
+import Progresso from './Progresso';
 
 // One progress ring (Tarefas / Foco / Agua).
 function Ring({ pct, color, letter, label }) {
@@ -30,10 +31,10 @@ function Ring({ pct, color, letter, label }) {
 }
 
 function GameHeader({ stats }) {
-  const { streak, atRisk, level, levelProgress, xpIntoLevel, xpForNext, rings } = stats;
+  const { streak, atRisk, level, levelProgress, xpIntoLevel, xpForNext, rings, shieldsLeft } = stats;
   return (
     <div className="card space-y-4">
-      <div className="flex items-center gap-4">
+      <button onClick={onOpen} aria-label="Ver progresso" className="w-full flex items-center gap-4 text-left">
         <div className="flex items-center gap-2 shrink-0" aria-label={`Sequencia de ${streak} dias`}>
           <Flame size={22} className={streak > 0 ? 'text-orange-400' : 'text-zinc-700'} aria-hidden="true" />
           <div className="leading-none">
@@ -51,9 +52,15 @@ function GameHeader({ stats }) {
             <div className="h-full bg-indigo-500 rounded-full transition-[width] duration-500 ease-out" style={{ width: `${Math.min(100, levelProgress * 100)}%` }} />
           </div>
         </div>
-      </div>
+        <div className="flex flex-col items-center gap-0.5 shrink-0">
+          <span className="flex items-center gap-0.5 text-cyan-400" title="Escudos este mes" aria-label={`${shieldsLeft} escudos este mes`}>
+            <Shield size={12} aria-hidden="true" /><span className="text-[11px] font-semibold tabular-nums">{shieldsLeft}</span>
+          </span>
+          <ChevronRight size={14} className="text-zinc-600" aria-hidden="true" />
+        </div>
+      </button>
       {atRisk && streak > 0 && (
-        <p className="text-[11px] text-orange-300/80 bg-orange-500/10 rounded-lg px-3 py-2">Termine 80% das tarefas de hoje pra manter a sequencia.</p>
+        <p className="text-[11px] text-orange-300/80 bg-orange-500/10 rounded-lg px-3 py-2">Faz 1 pomodoro ou 80% das tarefas pra manter a sequencia (ou um escudo salva).</p>
       )}
       <div className="flex justify-around pt-1">
         <Ring pct={rings.tasks.pct} color="#6366f1" letter="T" label={rings.tasks.label} />
@@ -140,6 +147,7 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
   const today = getDateKey();
   const stats = useMemo(() => computeStats(state), [state]);
   const [guideId, setGuideId] = useState(null);
+  const [showProgress, setShowProgress] = useState(false);
   const [selectedDate, setSelectedDate] = useState(today);
   const isToday = selectedDate === today;
   const sensors = useSensors(
@@ -227,7 +235,7 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
   return (
     <div className="section-gap animate-in">
       {/* Gamification: streak, level, XP, daily rings */}
-      <GameHeader stats={stats} />
+      <GameHeader stats={stats} onOpen={() => setShowProgress(true)} />
 
       {/* Today's classes → mark presente/faltei (only for today) */}
       {isToday && <AulasHoje state={state} updateState={updateState} userId={userId} />}
@@ -314,6 +322,7 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
       )}
 
       {guideId && <GuideViewer guideId={guideId} onClose={() => setGuideId(null)} />}
+      {showProgress && <Progresso state={state} onClose={() => setShowProgress(false)} />}
     </div>
   );
 }
