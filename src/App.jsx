@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Component } from 'react';
 import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey, ensureTodayRoutineTasks, updateProfile as updateProfileDb } from './store';
 import { buildCircularTask } from './lib/circular';
 import { useAuth } from './lib/auth';
@@ -540,10 +540,31 @@ function OrganizadorApp() {
   );
 }
 
+// Catches render crashes so a bug shows a reload screen (with the error)
+// instead of a blank white/silver screen.
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('App crash:', error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center gap-5 page-x text-center">
+          <p className="text-sm text-zinc-300">Algo quebrou ao carregar o app.</p>
+          <button onClick={() => window.location.reload()}
+            className="bg-indigo-500 hover:bg-indigo-400 text-white px-5 py-3 rounded-xl text-sm font-medium">Recarregar</button>
+          <p className="text-[10px] text-zinc-700 break-all max-w-sm">{String(this.state.error?.message || this.state.error)}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const { session, loading } = useAuth();
 
   if (loading) return <LoadingScreen />;
   if (!session) return <Login />;
-  return <OrganizadorApp />;
+  return <ErrorBoundary><OrganizadorApp /></ErrorBoundary>;
 }
