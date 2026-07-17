@@ -30,7 +30,7 @@ function Ring({ pct, color, letter, label }) {
   );
 }
 
-function GameHeader({ stats }) {
+function GameHeader({ stats, onOpen }) {
   const { streak, atRisk, level, levelProgress, xpIntoLevel, xpForNext, rings, shieldsLeft } = stats;
   return (
     <div className="card space-y-4">
