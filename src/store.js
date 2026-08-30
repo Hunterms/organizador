@@ -1,4 +1,7 @@
 import { supabase } from './lib/supabase';
+import { getDateKey } from './lib/attendance';
+import { buildWeekPlan, tituloBloco } from './lib/weekPlan';
+import { classDates } from './lib/attendance';
 
 // ==========================================================================
 // State shape (same as before, but hydrated from Supabase)
@@ -13,7 +16,7 @@ const defaultState = {
   attendance: [],
   studySessions: [],
   pomodoroSettings: { focusDuration: 25, shortBreak: 5, longBreak: 15, sessionsBeforeLong: 4 },
-  settings: { weight: 78, bottleSize: 700, waterGoal: 2730 },
+  settings: { weight: 78, bottleSize: 700, waterGoal: 2730, semesterStart: '', semesterEnd: '' },
   patterns: [],
 };
 
@@ -113,6 +116,11 @@ export async function fetchAllData(userId) {
     // and should be soft-dismissed instead of hard-deleted.
     classroom_course_id: s.classroom_course_id,
     class_schedule: s.class_schedule || [],
+    // Recorte proprio da materia: MC621 abre 21/08 e fecha 20/11; EE400 cancela
+    // 5 datas. Sem isso o denominador dos 75% conta aula que nunca existiu.
+    start_date: s.start_date || null,
+    end_date: s.end_date || null,
+    skip_dates: s.skip_dates || [],
     grade_formula: s.grade_formula || '',
     topics: topicsBySubject[s.id] || [],
     exams: examsBySubject[s.id] || [],
@@ -153,6 +161,8 @@ export async function fetchAllData(userId) {
       pomodoros_done: t.pomodoros_done || 0,
       // Optional study guide (HTML) attached to this task.
       guide_id: t.guide_id || null,
+      topic_id: t.topic_id || null,
+      subject_id: t.subject_id || null,
     })),
     subjects: subjectsWithChildren,
     kanban,
@@ -167,6 +177,8 @@ export async function fetchAllData(userId) {
       waterGoal: profile?.water_goal || 2730,
       wakeHour: profile?.wake_hour ?? 7,
       sleepHour: profile?.sleep_hour ?? 22,
+      semesterStart: profile?.semester_start || '',
+      semesterEnd: profile?.semester_end || '',
     },
     pomodoroSettings: profile?.pomodoro_settings || defaultState.pomodoroSettings,
   };
@@ -188,6 +200,9 @@ export async function createTask(userId, task) {
   // Companion link (e.g., circular task → aula parent). Only sent when set so
   // older schemas without the column keep working.
   if (task.companion_task_id) payload.companion_task_id = task.companion_task_id;
+  if (task.guide_id) payload.guide_id = task.guide_id;
+  if (task.topic_id) payload.topic_id = task.topic_id;
+  if (task.subject_id) payload.subject_id = task.subject_id;
   const { data, error } = await supabase.from('tasks').insert(payload).select().single();
   if (error) throw error;
   return { id: data.id, ...task };
@@ -360,18 +375,18 @@ export async function deleteAttendance(userId, subjectId, date) {
   if (error) throw error;
 }
 
-// Attendance summary for a subject: absences, planned classes, and the
-// max misses allowed under Unicamp's 75% rule. SEMESTER_WEEKS is an estimate.
-const SEMESTER_WEEKS = 16;
-export function attendanceSummary(subject, attendance) {
-  const slots = (subject.class_schedule || []).length;
-  const totalPlanned = slots * SEMESTER_WEEKS;
-  const maxMisses = Math.floor(totalPlanned * 0.25);
-  const records = (attendance || []).filter(a => a.subjectId === subject.id);
-  const absences = records.filter(a => a.status === 'absent').length;
-  const presents = records.filter(a => a.status === 'present').length;
-  return { slots, totalPlanned, maxMisses, absences, presents, remaining: Math.max(0, maxMisses - absences) };
+// Bulk upsert — usado pra recuperar um periodo inteiro de faltas de uma vez.
+export async function setAttendanceBulk(userId, rows) {
+  if (!rows.length) return [];
+  const { data, error } = await supabase.from('attendance')
+    .upsert(rows.map(r => ({ user_id: userId, subject_id: r.subjectId, date: r.date, status: r.status })),
+      { onConflict: 'user_id,subject_id,date' })
+    .select();
+  if (error) throw error;
+  return data.map(d => ({ id: d.id, subjectId: d.subject_id, date: d.date, status: d.status }));
 }
+
+export { classDates, attendanceSummary, getDateKey } from './lib/attendance';
 
 // Study sessions
 export async function createStudySession(userId, session) {
@@ -455,6 +470,34 @@ export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, cust
   return created;
 }
 
+// Aulas de hoje viram tarefa com horario. Sem isso a aula nao existe na lista
+// do dia, e o push de lembrete (que le tasks.time) nao tem o que lembrar.
+// Respeita o recorte da materia e os dias sem aula, pelo mesmo classDates.
+export async function ensureTodayClassTasks(userId, { tasks, subjects, settings }) {
+  const today = getDateKey();
+  const ini = settings?.semesterStart, fim = settings?.semesterEnd;
+  if (!ini || !fim || today < ini || today > fim) return [];
+  const existentes = new Set((tasks || [])
+    .filter(t => t.date === today && t.category === 'aula')
+    .map(t => t.title.toLowerCase()));
+  const criadas = [];
+  for (const s of subjects || []) {
+    for (const c of classDates(s, today, today)) {
+      const title = `Aula: ${s.code || s.name}${c.room ? ' · ' + c.room : ''}`;
+      if (existentes.has(title.toLowerCase())) continue;
+      try {
+        const saved = await createTask(userId, {
+          title, category: 'aula', effort: '120', time: c.time,
+          done: false, date: today, recurring: false, subject_id: s.id,
+        });
+        criadas.push(saved);
+        existentes.add(title.toLowerCase());
+      } catch (e) { console.error('ensureTodayClassTasks falhou para', title, e); }
+    }
+  }
+  return criadas;
+}
+
 // Custom rooms
 export async function createCustomRoom(userId, room) {
   const { error } = await supabase.from('custom_rooms').insert({
@@ -501,6 +544,8 @@ export async function updateProfile(userId, updates) {
   if ('waterGoal' in updates) dbUpdates.water_goal = updates.waterGoal;
   if ('wakeHour' in updates) dbUpdates.wake_hour = updates.wakeHour;
   if ('sleepHour' in updates) dbUpdates.sleep_hour = updates.sleepHour;
+  if ('semesterStart' in updates) dbUpdates.semester_start = updates.semesterStart || null;
+  if ('semesterEnd' in updates) dbUpdates.semester_end = updates.semesterEnd || null;
   if ('pomodoroSettings' in updates) dbUpdates.pomodoro_settings = updates.pomodoroSettings;
   const { error } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
   if (error) throw error;
@@ -513,12 +558,7 @@ export async function updateProfile(userId, updates) {
 // which shifts to UTC and caused tasks to jump a day when the user was past
 // ~21:00 in Brazil (UTC-3) — "today" in the app silently became tomorrow,
 // tasks for today disappeared, "done" toggles saved to the wrong date.
-export function getDateKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
+// getDateKey mora em lib/attendance (a expansao da grade precisa dele sem o store).
 
 export function getDayName(date) {
   return date.toLocaleDateString('pt-BR', { weekday: 'short' });
@@ -823,4 +863,81 @@ export function getTodayReviews(subjects) {
   return reviews;
 }
 
+// ==========================================================================
+// Plano da semana (docs/METODOS.md). Gerado no domingo, cobre domingo a sabado.
+// Cada bloco vira uma tarefa de estudo com pomodoro obrigatorio, porque marcar
+// como feita sem foco estraga o dado que o resto do app usa.
+// ==========================================================================
+
+// O metodo do bloco vira um guia, e o guia e reaproveitado: sao 6 combinacoes
+// de (tipo de materia x novo/recuperacao), nao 18 guias por semana.
+async function ensureMethodGuide(userId, cache, bloco) {
+  const key = `${bloco.tipo}|${bloco.kind}`;
+  if (cache.has(key)) return cache.get(key);
+  const title = `Metodo: ${bloco.tipo} · ${bloco.kind === 'novo' ? 'conteudo novo' : 'recuperacao'}`;
+  const { data: achado } = await supabase.from('study_guides')
+    .select('id').eq('user_id', userId).eq('title', title).maybeSingle();
+  let id = achado?.id;
+  if (!id) {
+    const html = `<h2>${title}</h2><p>${bloco.method}</p>`
+      + '<p><small>Regra em docs/METODOS.md. Bloco de 50min. Termine escrevendo'
+      + ' numa linha qual e o proximo passo: isso corta o residuo de atencao.</small></p>';
+    const { data, error } = await supabase.from('study_guides')
+      .insert({ user_id: userId, title, html }).select('id').single();
+    if (error) throw error;
+    id = data.id;
+  }
+  cache.set(key, id);
+  return id;
+}
+
+export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) {
+  const plano = buildWeekPlan(state.subjects, inicio, weekBudget(state.settings));
+  if (!plano.length) return [];
+  // Dedupe por titulo+data: rodar duas vezes no mesmo domingo nao duplica nada.
+  const existentes = new Set((state.tasks || [])
+    .filter(t => t.category === 'estudos')
+    .map(t => `${t.date}|${t.title}`));
+  const guias = new Map();
+  const criadas = [];
+  for (const b of plano) {
+    const title = tituloBloco(b);
+    if (existentes.has(`${b.date}|${title}`)) continue;
+    try {
+      const guide_id = await ensureMethodGuide(userId, guias, b);
+      const saved = await createTask(userId, {
+        title, category: 'estudos', effort: '60', time: b.time,
+        done: false, date: b.date, recurring: false,
+        required_pomodoros: 1, guide_id, topic_id: b.topicId || null,
+      });
+      criadas.push({ ...saved, guide_id });
+      existentes.add(`${b.date}|${title}`);
+    } catch (e) { console.error('bloco do plano falhou:', title, e); }
+  }
+  return criadas;
+}
+
+// Minutos disponiveis por dia da semana, indice 0=domingo.
+// Default: 2h em dia util, 4h no fim de semana (o que o Hunter declarou).
+// Concluir um bloco de estudo carimba o topico: e o que faz a semana seguinte
+// nao sortear o mesmo assunto. Reverter a tarefa desfaz o carimbo.
+export async function markTopicStudied(topicId, minutes, feito) {
+  const { data, error } = await supabase.from('topics')
+    .select('total_study_minutes').eq('id', topicId).single();
+  if (error) throw error;
+  const base = data?.total_study_minutes || 0;
+  const patch = feito
+    ? { last_studied: getDateKey(), total_study_minutes: base + minutes }
+    : { total_study_minutes: Math.max(0, base - minutes) };
+  const { error: e2 } = await supabase.from('topics').update(patch).eq('id', topicId);
+  if (e2) throw e2;
+}
+
+export function weekBudget(settings = {}) {
+  const util = (settings.studyWeekdayMin ?? 120);
+  const fds = (settings.studyWeekendMin ?? 240);
+  return [fds, util, util, util, util, util, fds];
+}
+
+export { buildWeekPlan };
 export { defaultState };

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import {
   getDateKey, getTodayReviews,
-  updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb,
+  updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb, markTopicStudied,
 } from '../store';
-import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play, Shield, ChevronRight } from 'lucide-react';
+import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play, Shield, ChevronRight, CalendarClock, Loader2 } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -143,7 +143,7 @@ function SortableTask({ task, onToggle, onDelete, onEdit, onFocus, onGuide }) {
   );
 }
 
-export default function Hoje({ state, updateState, userId, onEditTask, onFocusTask }) {
+export default function Hoje({ state, updateState, userId, onEditTask, onFocusTask, onGenerateWeekPlan }) {
   const today = getDateKey();
   const stats = useMemo(() => computeStats(state), [state]);
   const [guideId, setGuideId] = useState(null);
@@ -194,6 +194,23 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
     updateState(p => ({ ...p, tasks: p.tasks.map(t => t.id === id ? { ...t, done: nextDone } : t) }));
     if (typeof id === 'string' && id.startsWith('tmp-')) return;
     updateTaskDb(id, { done: nextDone }).catch(e => console.error('toggleTask sync failed:', e));
+    // Bloco de estudo amarrado a um topico carimba o topico ao fechar. E o que
+    // impede o plano da semana seguinte de sortear o mesmo assunto de novo.
+    if (current.topic_id) {
+      const min = Number(current.effort) || 50;
+      markTopicStudied(current.topic_id, min, nextDone)
+        .then(() => updateState(p => ({
+          ...p,
+          subjects: p.subjects.map(sub => ({
+            ...sub,
+            topics: (sub.topics || []).map(t => t.id === current.topic_id
+              ? { ...t, last_studied: nextDone ? today : t.last_studied,
+                  totalStudyMinutes: Math.max(0, (t.totalStudyMinutes || 0) + (nextDone ? min : -min)) }
+              : t),
+          })),
+        })))
+        .catch(e => console.error('markTopicStudied failed:', e));
+    }
   };
   const deleteTask = (id) => {
     // Decide dismiss vs hard-delete BEFORE we drop the task from state.
@@ -222,6 +239,8 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
     if (add.length) updateState(p => ({ ...p, tasks: [...p.tasks, ...add] }));
   };
 
+  const [planBusy, setPlanBusy] = useState(false);
+
   const handleDragEnd = (event) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -236,6 +255,36 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
     <div className="section-gap animate-in">
       {/* Gamification: streak, level, XP, daily rings */}
       <GameHeader stats={stats} onOpen={() => setShowProgress(true)} />
+
+      {/* Plano da semana: some quando a semana ja tem bloco de estudo marcado */}
+      {onGenerateWeekPlan && (() => {
+        const fim = new Date(today + 'T12:00:00'); fim.setDate(fim.getDate() + 7);
+        const fimKey = getDateKey(fim);
+        const temPlano = (state.tasks || []).some(
+          t => t.category === 'estudos' && t.date >= today && t.date <= fimKey);
+        if (temPlano) return null;
+        return (
+          <button onClick={async () => { setPlanBusy(true); await onGenerateWeekPlan(); setPlanBusy(false); }}
+            disabled={planBusy}
+            className="w-full card !bg-violet-500/10 !border-violet-500/25 hover:!bg-violet-500/15 transition-colors text-left disabled:opacity-50">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center shrink-0">
+                {planBusy
+                  ? <Loader2 size={18} className="text-violet-400 animate-spin" aria-hidden="true" />
+                  : <CalendarClock size={18} className="text-violet-400" aria-hidden="true" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-semibold text-violet-300 leading-snug">Semana sem plano de estudo</p>
+                <p className="text-[11px] text-violet-400/70 mt-1 leading-relaxed">
+                  Monta os blocos de 50min por prazo de prova: conteudo novo no fim de semana,
+                  recuperacao nos dias uteis. Toque pra gerar.
+                </p>
+              </div>
+              <ChevronRight size={14} className="text-violet-400 shrink-0 mt-1" aria-hidden="true" />
+            </div>
+          </button>
+        );
+      })()}
 
       {/* Today's classes → mark presente/faltei (only for today) */}
       {isToday && <AulasHoje state={state} updateState={updateState} userId={userId} />}
