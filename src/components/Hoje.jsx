@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   getDateKey, getTodayReviews,
-  updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb, markTopicStudied,
+  updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb, markTopicStudied, intervaloCepeda, updateTopic as updateTopicDb,
 } from '../store';
 import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play, Shield, ChevronRight, CalendarClock, Loader2 } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -198,13 +198,23 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
     // impede o plano da semana seguinte de sortear o mesmo assunto de novo.
     if (current.topic_id) {
       const min = Number(current.effort) || 50;
-      markTopicStudied(current.topic_id, min, nextDone)
+      // Agenda a revisao pela regra do Cepeda: 15% do tempo que falta pra
+      // proxima avaliacao daquela materia. E o que faz a revisao existir.
+      const dono = (state.subjects || []).find(sub =>
+        (sub.topics || []).some(t => t.id === current.topic_id));
+      const prox = (dono?.exams || [])
+        .filter(e => e.date >= today && e.status !== 'feita')
+        .sort((a, b) => a.date.localeCompare(b.date))[0];
+      const revisaoEm = prox ? intervaloCepeda(today, prox.date) : null;
+      if (nextDone) setFechando({ topicId: current.topic_id, titulo: current.title });
+      markTopicStudied(current.topic_id, min, nextDone, revisaoEm)
         .then(() => updateState(p => ({
           ...p,
           subjects: p.subjects.map(sub => ({
             ...sub,
             topics: (sub.topics || []).map(t => t.id === current.topic_id
               ? { ...t, last_studied: nextDone ? today : t.last_studied,
+                  next_review_at: nextDone && revisaoEm ? revisaoEm : t.next_review_at,
                   totalStudyMinutes: Math.max(0, (t.totalStudyMinutes || 0) + (nextDone ? min : -min)) }
               : t),
           })),
@@ -240,6 +250,11 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
   };
 
   const [planBusy, setPlanBusy] = useState(false);
+  // Ritual de fechamento (Leroy): ao fechar um bloco de estudo, uma linha sobre
+  // o proximo passo. Quem escreve o plano de retomada carrega menos residuo de
+  // atencao pra tarefa seguinte. Sem campo, a instrucao do guia era decorativa.
+  const [fechando, setFechando] = useState(null);
+  const [proximoPasso, setProximoPasso] = useState('');
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
@@ -368,6 +383,42 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
             </ul>
           </SortableContext>
         </DndContext>
+      )}
+
+      {fechando && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
+          onClick={e => e.target === e.currentTarget && setFechando(null)}>
+          <div className="w-full sm:max-w-sm bg-[#18181b] border-t sm:border border-zinc-800 rounded-t-3xl sm:rounded-2xl px-7 pt-7 pb-9 animate-in">
+            <p className="text-sm font-semibold text-white">Qual e o proximo passo?</p>
+            <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
+              Uma linha, agora que o assunto ainda esta na cabeca. Quem escreve o plano
+              de retomada volta mais rapido da proxima vez.
+            </p>
+            <p className="text-[11px] text-zinc-600 mt-3 truncate">{fechando.titulo}</p>
+            <input value={proximoPasso} onChange={e => setProximoPasso(e.target.value)}
+              placeholder="ex: refazer os 3 que errei na lista 2"
+              autoFocus className="input-base mt-3 text-[13px]"
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => { setFechando(null); setProximoPasso(''); }}
+                className="flex-1 bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 rounded-xl min-h-[44px] text-xs font-medium">
+                Depois
+              </button>
+              <button disabled={!proximoPasso.trim()}
+                onClick={() => {
+                  const nota = proximoPasso.trim();
+                  updateState(p => ({ ...p, subjects: p.subjects.map(sub => ({ ...sub,
+                    topics: (sub.topics || []).map(t => t.id === fechando.topicId ? { ...t, feynman_note: nota } : t) })) }));
+                  updateTopicDb(fechando.topicId, { feynman_note: nota })
+                    .catch(e => console.error('proximo passo nao salvou:', e));
+                  setFechando(null); setProximoPasso('');
+                }}
+                className="flex-1 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-25 text-white rounded-xl min-h-[44px] text-xs font-medium">
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {guideId && <GuideViewer guideId={guideId} onClose={() => setGuideId(null)} />}

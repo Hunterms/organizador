@@ -231,3 +231,29 @@ const d = urgencia({ topics: [{ id: 'm', status: 'mastered', position: 1 }],
   exams: [{ name: 'P', date: '2026-10-01', status: 'pendente' }] }, '2026-08-31');
 assert.ok(d.peso > 0 && d.restantes === 0, 'materia coberta continua com peso de manutencao');
 console.log('ok — peso por taxa exigida');
+
+// --- intervalo de Cepeda: 10 a 20% do tempo ate a prova ---------------------
+const { intervaloCepeda } = await import('./weekPlan.js');
+const gap = (h, p) => Math.round((new Date(intervaloCepeda(h, p)) - new Date(h)) / 86400000);
+assert.equal(gap('2026-08-31', '2026-09-07'), 1, 'prova em 7 dias: revisa em 1');
+assert.equal(gap('2026-08-31', '2026-09-30'), 5, 'prova em 30 dias: revisa em ~5');
+assert.equal(gap('2026-08-31', '2026-11-29'), 14, 'prova em 90 dias: revisa em ~14');
+assert.equal(intervaloCepeda('2026-08-31', '2026-08-30'), null, 'prova que ja passou nao agenda');
+assert.equal(intervaloCepeda('2026-08-31', null), null);
+// teto de 21 dias: esquecer antes de revisar nao ajuda
+assert.ok(gap('2026-08-31', '2027-08-31') <= 21, 'o intervalo tem teto');
+
+// --- revisao vencida vem antes de conteudo novo -----------------------------
+const comRevisao = [{
+  id: 'r', code: 'MS211', class_schedule: [],
+  topics: [
+    { id: 'novo1', name: 'nunca visto', status: 'not_studied', position: 1 },
+    { id: 'vence', name: 'revisar', status: 'mastered', position: 2, next_review_at: '2026-08-25' },
+  ],
+  exams: [{ name: 'P1', date: '2026-10-06', status: 'pendente' }],
+}];
+const pr = buildWeekPlan(comRevisao, '2026-08-31');
+assert.equal(pr[0].topicId, 'vence', 'revisao vencida tem que vir antes de conteudo novo');
+assert.equal(pr[0].kind, 'revisao', 'e o bloco tem que ser marcado como revisao');
+assert.ok(/Retrieval/.test(pr[0].method), 'com metodo de retrieval, nao de exposicao');
+console.log('ok — Cepeda e revisao vencida no topo');
