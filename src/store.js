@@ -2,6 +2,7 @@ import { supabase } from './lib/supabase';
 import { getDateKey } from './lib/attendance';
 import { buildWeekPlan, tituloBloco, BLOCO_MIN } from './lib/weekPlan';
 import { classDates } from './lib/attendance';
+import { caiHoje } from './lib/rotina';
 
 // ==========================================================================
 // State shape (same as before, but hydrated from Supabase)
@@ -78,6 +79,7 @@ export async function fetchAllData(userId) {
   const routineMap = {};
   (homeRoutine || []).forEach(r => { routineMap[r.room_key] = {
     days: r.days, category: r.category || 'casa', time: r.time || '', effort: r.effort || '30',
+    interval_weeks: r.interval_weeks || 1, week_offset: r.week_offset || 0,
   }; });
 
   // Subjects with embedded topics + exams
@@ -416,6 +418,8 @@ export async function setWaterLog(userId, date, bottles) {
 // Home routine
 export async function updateHomeRoutine(userId, roomKey, days, extra = {}) {
   const row = { user_id: userId, room_key: roomKey, days };
+  if ('interval_weeks' in extra) row.interval_weeks = extra.interval_weeks;
+  if ('week_offset' in extra) row.week_offset = extra.week_offset;
   if ('category' in extra) row.category = extra.category;
   if ('time' in extra) row.time = extra.time;
   if ('effort' in extra) row.effort = extra.effort;
@@ -456,7 +460,6 @@ export function roomLabelFor(key, customRooms = []) {
 // insert is awaited individually so one failure doesn't drop the rest.
 export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, customRooms }) {
   const today = getDateKey();
-  const dow = new Date().getDay();
   // Dedupe por titulo em QUALQUER categoria: a rotina deixou de ser so casa
   // (pilates e academia entram por aqui), entao filtrar por 'casa' deixaria
   // passar treino duplicado.
@@ -465,7 +468,8 @@ export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, cust
   );
   const created = [];
   for (const [key, cfg] of Object.entries(homeRoutine || {})) {
-    if (!cfg?.days?.includes(dow)) continue;
+    // caiHoje cobre o ciclo tambem: quinzenal e mensal, nao so dia da semana.
+    if (!caiHoje(cfg, today)) continue;
     const title = roomLabelFor(key, customRooms);
     if (!title || existing.has(title.toLowerCase())) continue;
     try {

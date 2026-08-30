@@ -1,4 +1,4 @@
-import { getDateKey } from '../store';
+import { getDateKey } from './attendance.js';
 
 // Gamification is fully DERIVED from existing state — no stored counters, so it
 // can never double-count or desync. Streak, XP, level and rings are pure
@@ -13,6 +13,14 @@ const SHIELDS_PER_MONTH = 2;    // auto-saves a missed day, max 2 per calendar m
 // mais alta (Dunlosky 2013), entao lidera; agua vira simbolica.
 // Ver docs/METODOS.md secao 1.
 const XP = { task: 10, pomodoro: 30, water: 5, retrieval: 50 };
+
+// XP da tarefa proporcional ao esforco. Com XP fixo, escovar o dente (5min)
+// valia igual a limpar a sala (30min), e as 8 ancoras diarias da rotina
+// rendiam mais que dois pomodoros de estudo. A tarefa curta continua dando
+// ponto — a sensacao de cumprir e o objetivo dela — so nao empata com meia
+// hora de trabalho.
+const XP_POR_ESFORCO = { '5': 2, '10': 3, '30': 10, '60': 20, '120': 30 };
+export const xpDaTarefa = (t) => XP_POR_ESFORCO[String(t.effort)] ?? XP.task;
 
 // A task counts as done only when checked AND its pomodoro requirement is met.
 export function effectiveDone(t) {
@@ -110,7 +118,9 @@ function levelForXp(xp) {
 
 export function computeStats(state, today = getDateKey()) {
   const tasks = state.tasks || [];
-  const doneTasks = tasks.filter(effectiveDone).length;
+  const feitas = tasks.filter(effectiveDone);
+  const doneTasks = feitas.length;
+  const xpTarefas = feitas.reduce((n, t) => n + xpDaTarefa(t), 0);
   const focusSessions = (state.studySessions || []).filter((s) => s.type === 'focus').length;
 
   const goalMl = state.settings?.waterGoal || 0;
@@ -123,7 +133,7 @@ export function computeStats(state, today = getDateKey()) {
   let retrieval = 0;
   for (const s of state.subjects || []) for (const t of s.topics || []) retrieval += t.retrieval_count || 0;
 
-  const xp = doneTasks * XP.task + focusSessions * XP.pomodoro + waterDays * XP.water + retrieval * XP.retrieval;
+  const xp = xpTarefas + focusSessions * XP.pomodoro + waterDays * XP.water + retrieval * XP.retrieval;
   const level = levelForXp(xp);
   const cur = xpForLevel(level);
   const next = xpForLevel(level + 1);

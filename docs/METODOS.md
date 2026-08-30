@@ -251,6 +251,47 @@ O sistema tem duas camadas:
 Sete cômodos, sete dias, nenhum dia de faxina. E o piso do streak protege: um
 pomodoro de foco segura o dia mesmo com a casa por fazer.
 
+## 4e. O inventário de tarefas, e por que tarefa pequena conta
+
+Amabile e Kramer analisaram **12.000 registros diários de 238 pessoas em 7
+empresas**. De tudo que acontece num bom dia, o que mais pesou foi
+**fazer progresso** — acima de reconhecimento e de incentivo. Progresso pequeno
+e frequente bate recompensa grande e rara.
+
+É por isso que escovar o dente é uma tarefa marcável no app e não uma
+desfeita. Mas ela não pode valer o mesmo que meia hora de trabalho: o XP passou
+a ser **proporcional ao esforço** (5min vale 2, 30min vale 10, 60min vale 20).
+Antes, com XP fixo em 10, as oito âncoras diárias rendiam 80 XP contra 60 de
+dois pomodoros de estudo — a rotina pagava melhor que aprender.
+
+### As frequências, e de onde vêm
+
+| Tarefa | Frequência | Base |
+|---|---|---|
+| Trocar roupa de cama | semanal | 5.000.000 UFC/pol² após 1 semana; 11.900.000 após 4 |
+| Trocar toalha | 2× por semana | bactéria dobra a cada 30 min em pano úmido |
+| Peneirar a areia | diária | mínimo recomendado; caixa muito usada pede 2× ao dia |
+| Lavar a caixa inteira | quinzenal | troca completa a cada 2 a 4 semanas em areia aglomerante |
+| Escovar os dentes | 3× ao dia | acima do piso de 2× |
+| Trocar a escova | trimestral | ADA: 3 a 4 meses, ou antes se a cerda abrir |
+
+### Duas regras de montagem que saíram de medir, não de opinar
+
+**Quinzenal ímpar e mensal ímpar colidem sempre.** Um ciclo de 2 semanas com
+offset 1 cai em toda semana ímpar; um de 4 com offset 1 cai em 1, 5, 9 — todas
+ímpares. `mercado` e `banheiro pesado` estavam no mesmo sábado por construção,
+somando 205 minutos. Offset não basta: quando dois ciclos se contêm, um dos
+dois muda de dia.
+
+**Esforço declarado errado distorce o dia inteiro.** "Descer o lixo reciclável"
+estava marcado como 30 minutos. Simulando 12 semanas, isso sozinho inflava a
+segunda em meia hora que não existe. Âncora curta tem que estar marcada como
+curta, senão o app mente sobre o tamanho do dia.
+
+Medido em 84 dias: 75 a 90 minutos de tarefa por dia útil, dos quais cerca de
+45 são âncoras de 5 minutos. O pico é 205 minutos, num sábado por mês, e 120
+deles são o mercado.
+
 ## 5. As regras que o planejador obedece
 
 1. **Prazo manda.** Peso de cada matéria = proximidade da próxima avaliação.
