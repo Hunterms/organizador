@@ -53,12 +53,15 @@ export function urgencia(subject, hoje) {
 // uma ancora: a hora livre no maior numero de dias, e so desviamos onde a aula
 // ocupa. O mesmo vale pro fim de semana, com sua propria ancora.
 const CAND_UTIL = [19, 20, 21, 18, 17, 22, 16];
+const HORA_MANHA = 8;
 const CAND_FDS = [9, 10, 14, 15, 16, 17];
 
 function ocupacaoDoDia(subject_list, date) {
   const dow = new Date(date + 'T12:00:00').getDay();
   const ocupado = [];
   for (const s of subject_list) {
+    // Aula que ele nao vai nao ocupa a agenda: aquele horario vira estudo.
+    if (s.attends === false) continue;
     for (const sl of s.class_schedule || []) {
       if (sl.day !== dow || !sl.time) continue;
       const ini = Number(sl.time.slice(0, 2)) * 60 + Number(sl.time.slice(3, 5));
@@ -130,7 +133,7 @@ function escolheTopico(subject, novo, usados) {
  *
  * budget: minutos disponiveis por dia da semana, indice 0=domingo.
  */
-export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoEstudo = {}) {
+export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoEstudo = {}, morningDays = []) {
   const ativas = (subjects || []).filter(s => (s.topics || []).length || (s.exams || []).length);
   if (!ativas.length) return [];
 
@@ -219,14 +222,24 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
   for (let d = 0; d < 7; d++) {
     const date = dias[d];
     const dow = new Date(date + 'T12:00:00').getDay();
-    const novo = dow === 0 || dow === 6;   // conteudo novo so no fim de semana
+    const fds = dow === 0 || dow === 6;
+    // Manha liberada: o primeiro bloco do dia vai as 8h e leva conteudo novo,
+    // porque antes do trabalho a cabeca rende pra aprender. Ele SUBSTITUI um
+    // bloco da noite, nao soma: o orcamento da semana continua o mesmo.
+    const temManha = morningDays.includes(dow) && !fds;
     const horasUsadas = new Set();
+    let primeiro = true;
     for (const { entrada } of alocados.filter(a => a.d === d)) {
+      const naManha = temManha && primeiro;
+      primeiro = false;
+      const novo = fds || naManha;
       const tipo = tipoDe(entrada.s);
       const topico = escolheTopico(entrada.s, novo, topicosUsados);
       plano.push({
         date,
-        time: horarioLivre(subjects, date, horasUsadas, novo ? ancoraFds : ancoraUtil),
+        time: naManha
+          ? (horasUsadas.add(HORA_MANHA), String(HORA_MANHA).padStart(2, '0') + ':00')
+          : horarioLivre(subjects, date, horasUsadas, fds ? ancoraFds : ancoraUtil),
         subjectId: entrada.s.id,
         code: entrada.s.code || entrada.s.name,
         topic: topico?.name || null,

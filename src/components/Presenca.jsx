@@ -19,7 +19,7 @@ export default function Presenca({ state, updateState, userId, onClose }) {
 
   const today = getDateKey();
   const { semesterStart = '', semesterEnd = '' } = state.settings || {};
-  const subjects = (state.subjects || []).filter(s => (s.class_schedule || []).length);
+  const subjects = (state.subjects || []).filter(s => s.attends !== false && (s.class_schedule || []).length);
 
   const setDates = (patch) => {
     updateState(p => ({ ...p, settings: { ...p.settings, ...patch } }));

@@ -116,6 +116,8 @@ export async function fetchAllData(userId) {
     // and should be soft-dismissed instead of hard-deleted.
     classroom_course_id: s.classroom_course_id,
     class_schedule: s.class_schedule || [],
+    attends: s.attends !== false,
+    work_slot: !!s.work_slot,
     // Recorte proprio da materia: MC621 abre 21/08 e fecha 20/11; EE400 cancela
     // 5 datas. Sem isso o denominador dos 75% conta aula que nunca existiu.
     start_date: s.start_date || null,
@@ -179,6 +181,7 @@ export async function fetchAllData(userId) {
       sleepHour: profile?.sleep_hour ?? 22,
       semesterStart: profile?.semester_start || '',
       semesterEnd: profile?.semester_end || '',
+      morningDays: profile?.morning_days || [],
     },
     pomodoroSettings: profile?.pomodoro_settings || defaultState.pomodoroSettings,
   };
@@ -482,13 +485,20 @@ export async function ensureTodayClassTasks(userId, { tasks, subjects, settings 
     .map(t => t.title.toLowerCase()));
   const criadas = [];
   for (const s of subjects || []) {
+    // attends=false + work_slot=true: nao e aula, e janela de entrega. MC621
+    // paga 2 pontos por exercicio dentro das 4h e 1 depois, o que muda a
+    // aprovacao de 30 para 60 problemas no semestre.
+    if (s.attends === false && !s.work_slot) continue;
     for (const c of classDates(s, today, today)) {
-      const title = `Aula: ${s.code || s.name}${c.room ? ' · ' + c.room : ''}`;
+      const title = s.attends === false
+        ? `${s.code || s.name}: exercicios da semana (janela de 2x pontos)`
+        : `Aula: ${s.code || s.name}${c.room ? ' · ' + c.room : ''}`;
       if (existentes.has(title.toLowerCase())) continue;
       try {
         const saved = await createTask(userId, {
           title, category: 'aula', effort: '120', time: c.time,
           done: false, date: today, recurring: false, subject_id: s.id,
+          required_pomodoros: s.attends === false ? 4 : 0,
         });
         criadas.push(saved);
         existentes.add(title.toLowerCase());
@@ -546,6 +556,7 @@ export async function updateProfile(userId, updates) {
   if ('sleepHour' in updates) dbUpdates.sleep_hour = updates.sleepHour;
   if ('semesterStart' in updates) dbUpdates.semester_start = updates.semesterStart || null;
   if ('semesterEnd' in updates) dbUpdates.semester_end = updates.semesterEnd || null;
+  if ('morningDays' in updates) dbUpdates.morning_days = updates.morningDays || [];
   if ('pomodoroSettings' in updates) dbUpdates.pomodoro_settings = updates.pomodoroSettings;
   const { error } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
   if (error) throw error;
@@ -892,7 +903,7 @@ async function ensureMethodGuide(userId, cache, bloco) {
 }
 
 export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) {
-  const plano = buildWeekPlan(state.subjects, inicio, weekBudget(state.settings));
+  const plano = buildWeekPlan(state.subjects, inicio, weekBudget(state.settings), {}, state.settings?.morningDays || []);
   if (!plano.length) return [];
   // Dedupe por data+MATERIA, nao por titulo. Titulo carrega o topico escolhido,
   // e duas geracoes do mesmo domingo podem escolher topicos diferentes: o

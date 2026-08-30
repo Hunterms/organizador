@@ -48,6 +48,12 @@ export function classDates(subject, from, to) {
 // saber quais aulas ja aconteceram).
 const SEMESTER_WEEKS = 16;
 export function attendanceSummary(subject, attendance, settings = {}, today = getDateKey()) {
+  // Materia que ele nao frequenta nao tem falta pra contar. Devolver zeros e
+  // mais honesto que devolver um limite que nao vale.
+  if (subject.attends === false) {
+    return { slots: 0, weekHours: 0, totalPlanned: 0, maxMisses: 0, absences: 0,
+             presents: 0, remaining: 0, past: 0, unmarked: 0, tracked: false };
+  }
   const slots = subject.class_schedule || [];
   const weekHours = slots.reduce((n, sl) => n + (sl.duration || 120) / 60, 0);
   const { semesterStart, semesterEnd } = settings;
@@ -70,7 +76,7 @@ export function attendanceSummary(subject, attendance, settings = {}, today = ge
   return {
     slots: slots.length, weekHours, totalPlanned: totalHours, maxMisses,
     absences, presents, remaining: Math.max(0, maxMisses - absences),
-    past: past.length, unmarked,
+    past: past.length, unmarked, tracked: true,
   };
 }
 

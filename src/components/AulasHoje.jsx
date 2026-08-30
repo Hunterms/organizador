@@ -18,6 +18,7 @@ export default function AulasHoje({ state, updateState, userId }) {
 
   const classes = [];
   for (const s of state.subjects || []) {
+    if (s.attends === false) continue;   // nao frequenta: nao pergunta presenca
     for (const slot of s.class_schedule || []) {
       if (slot.day === dow) classes.push({ subjectId: s.id, label: s.code || s.name, time: slot.time || '', room: slot.room || '', subject: s });
     }
