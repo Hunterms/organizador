@@ -24,6 +24,10 @@ const S = [
 ];
 
 const DOM = '2026-08-30';
+// Enche os topicos: com poucos topicos o teto por materia corta o plano antes
+// do orcamento, e ai o teste de orcamento nao mede orcamento. O caso de poucos
+// topicos tem teste proprio la embaixo.
+for (const sub of S) while (sub.topics.length < 5) sub.topics.push(t(sub.id + 'x' + sub.topics.length, 'extra ' + sub.topics.length));
 const plano = buildWeekPlan(S, DOM);
 
 // --- orcamento: 2h por dia util, 4h no fim de semana, blocos de 50min --------
@@ -48,11 +52,21 @@ for (const s of S) {
   assert.ok(conta(s.code) >= 1, `${s.code} ficou sem nenhum bloco na semana`);
 }
 
-// --- regra 4: nunca duas vezes a mesma materia no mesmo dia ------------------
+// --- regra 4: uma materia por dia, EXCETO com avaliacao a menos de 2 dias ----
+const crunchDoDia = (dia) => S.filter(sub => (sub.exams || []).some(e => {
+  const d = Math.round((new Date(e.date + 'T12:00:00') - new Date(dia + 'T12:00:00')) / 86400000);
+  return d >= 0 && d <= 1;
+})).map(sub => sub.code);
 for (const dia of Object.keys(porDia)) {
   const codes = plano.filter(b => b.date === dia).map(b => b.code);
-  assert.equal(new Set(codes).size, codes.length, `${dia} repetiu materia no mesmo dia`);
+  const semCrunch = codes.filter(c => !crunchDoDia(dia).includes(c));
+  assert.equal(new Set(semCrunch).size, semCrunch.length,
+    `${dia} repetiu materia sem prazo colado: ${codes}`);
 }
+// E o inverso tem que valer: no dia anterior a A1, MC426 toma o dia inteiro.
+const vespera = plano.filter(b => b.date === '2026-08-31').map(b => b.code);
+assert.ok(vespera.every(c => c === 'MC426'),
+  `vespera da A1 devia ser toda de MC426, veio ${vespera}`);
 
 // --- regra 5: conteudo novo so no fim de semana ------------------------------
 for (const b of plano) {
@@ -146,3 +160,74 @@ assert.ok(maisComum >= 4,
 assert.ok(Object.keys(contagem).length <= 3,
   `dia util nao pode espalhar por mais de 3 horarios diferentes, espalhou ${Object.keys(contagem).length}`);
 console.log('ok — hora ancora, mais comum aparece', maisComum, 'vezes em', Object.keys(contagem).length, 'horarios');
+
+// --- nenhum bloco pode sair sem topico quando a materia tem topicos ---------
+const poucos = [
+  { id: 'p', code: 'MC426', class_schedule: [{ day: 2, time: '08:00', duration: 120 }],
+    topics: [t('u0', 'U0'), t('u1', 'U1')],
+    exams: [{ name: 'A1', date: '2026-09-01', status: 'pendente' }] },
+  { id: 'q', code: 'MS211', class_schedule: [],
+    topics: [t('n1', 'Zeros'), t('n2', 'Sistemas'), t('n3', 'Interpolacao'), t('n4', 'Integracao')],
+    exams: [{ name: 'P1', date: '2026-10-06', status: 'pendente' }] },
+];
+const pp = buildWeekPlan(poucos, DOM);
+for (const b of pp) {
+  assert.ok(b.topic, `${b.date} ${b.code} saiu sem topico — bloco vago nao ensina`);
+}
+assert.ok(pp.filter(b => b.code === 'MC426').length <= 2,
+  'MC426 tem 2 topicos: nao pode receber mais que 2 blocos');
+console.log('ok — cota limitada pelos topicos, nenhum bloco vago');
+
+// --- a ordem do relogio tem que seguir a ordem do conteudo ------------------
+// Na vespera da A1, MC426 toma o dia inteiro. Os topicos vem em ordem (U0, U1,
+// ...), entao os horarios tem que subir junto: estudar U4 antes de U0 e erro.
+const vesp = plano.filter(b => b.date === '2026-08-31');
+const idxTopico = vesp.map(b => S.find(s => s.code === b.code).topics.findIndex(t => t.name === b.topic));
+for (let i = 1; i < vesp.length; i++) {
+  assert.ok(vesp[i].time > vesp[i - 1].time, 'horarios do dia tem que subir');
+  assert.ok(idxTopico[i] > idxTopico[i - 1],
+    `conteudo fora de ordem: ${vesp[i-1].topic} as ${vesp[i-1].time} antes de ${vesp[i].topic} as ${vesp[i].time}`);
+}
+// E todo bloco tem que ter horario: bloco sem hora nao e implementation intention.
+for (const b of plano) assert.ok(b.time, `${b.date} ${b.code} saiu sem horario`);
+console.log('ok — relogio segue o conteudo, nenhum bloco sem hora');
+
+// --- a prova manda no assunto, nao so na urgencia ---------------------------
+// P1 cobre positions 10-19. Nenhum bloco antes dela pode cair na Parte III.
+const comFaixa = [{
+  id: 'ee', code: 'EE400', class_schedule: [],
+  topics: [
+    { id: 'p11', name: '1.1', status: 'not_studied', position: 11 },
+    { id: 'p12', name: '1.2', status: 'not_studied', position: 12 },
+    { id: 'p31', name: '3.1', status: 'not_studied', position: 31 },
+    { id: 'p32', name: '3.2', status: 'not_studied', position: 32 },
+  ],
+  exams: [{ name: 'Prova 1', date: '2026-09-09', status: 'pendente', covers_from: 10, covers_to: 19 },
+          { name: 'Prova 3', date: '2026-12-02', status: 'pendente', covers_from: 30, covers_to: 39 }],
+}];
+const pf = buildWeekPlan(comFaixa, '2026-08-31');
+const fora = pf.filter(b => b.topicId && !['p11', 'p12'].includes(b.topicId));
+assert.equal(fora.length, 0,
+  `bloco fora da faixa da P1: ${fora.map(b => b.topic + ' em ' + b.date)}`);
+assert.ok(pf.length >= 2, 'a faixa nao pode zerar o plano');
+console.log('ok — topico dentro da faixa da proxima prova');
+
+// --- o peso e taxa exigida, nao proximidade ---------------------------------
+const comTopicos = (n, dias, from, to) => ({
+  id: 'x' + n, code: 'X', topics: Array.from({ length: n }, (_, i) =>
+    ({ id: 'k' + i, name: 'k' + i, status: 'not_studied', position: from + i })),
+  exams: [{ name: 'P', date: new Date(Date.UTC(2026, 7, 31) + dias * 86400000).toISOString().slice(0, 10),
+            status: 'pendente', covers_from: from, covers_to: to }],
+});
+// 6 topicos em 9 dias e 12 em 18 sao a MESMA taxa: pesos tem que ficar juntos.
+const a = urgencia(comTopicos(6, 9, 10, 19), '2026-08-31').peso;
+const b = urgencia(comTopicos(12, 18, 1, 30), '2026-08-31').peso;
+assert.ok(Math.abs(a - b) / a < 0.1, `mesma taxa devia dar peso parecido: ${a} vs ${b}`);
+// Dobrar o conteudo com o mesmo prazo tem que dobrar o peso.
+const c = urgencia(comTopicos(12, 9, 10, 30), '2026-08-31').peso;
+assert.ok(c > a * 1.8, `o dobro de conteudo no mesmo prazo devia pesar ~2x: ${a} -> ${c}`);
+// Materia sem topico pendente entra em manutencao, nao some do plano.
+const d = urgencia({ topics: [{ id: 'm', status: 'mastered', position: 1 }],
+  exams: [{ name: 'P', date: '2026-10-01', status: 'pendente' }] }, '2026-08-31');
+assert.ok(d.peso > 0 && d.restantes === 0, 'materia coberta continua com peso de manutencao');
+console.log('ok — peso por taxa exigida');
