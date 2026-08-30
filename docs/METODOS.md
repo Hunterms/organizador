@@ -223,6 +223,34 @@ nas primeiras 4h e **1 ponto** depois. Aprovação exige 60 pontos. Isso quer
 dizer 30 problemas dentro da janela, ou 60 fora dela. Ficar fora da sexta 14–18
 não custa presença: custa o dobro de trabalho no semestre.
 
+## 4d. A casa: zona por dia, não dia de faxina
+
+A mesma evidência que derruba a maratona de véspera derruba o sábado de
+faxina. Duas razões, e a segunda é a que realmente pega:
+
+**Ação simples automatiza mais rápido.** Lally mediu isso: beber água chega à
+automaticidade bem antes de fazer 50 abdominais. Vinte minutos de um cômodo
+por dia vira hábito; três horas de faxina no sábado nunca vira, porque cada
+sábado é uma decisão nova.
+
+**Tarefa que não cabe no dia envenena o resto.** O organizador conta o dia como
+cumprido com 80% das tarefas feitas. "Organizar escritório" como tarefa diária
+somava 15 minutos de faxina real a cada dia, e uma casa mal cuidada passava a
+derrubar o streak de estudo. Isso é o oposto do que a rotina existe para fazer.
+Por isso os cômodos saíram de diário e viraram zona semanal, e sobrou só a
+âncora de dois minutos: a cama.
+
+O sistema tem duas camadas:
+
+- **Âncoras diárias**, 5 minutos cada: cama, gato, dente, garrafa, lixo. São
+  curtas de propósito, porque é o que automatiza.
+- **Uma zona por dia**, 20 a 30 minutos, cada cômodo uma vez por semana:
+  segunda sala, terça banheiro, quarta quarto, quinta escritório, sexta
+  lavanderia, sábado varanda, domingo guarda-roupa.
+
+Sete cômodos, sete dias, nenhum dia de faxina. E o piso do streak protege: um
+pomodoro de foco segura o dia mesmo com a casa por fazer.
+
 ## 5. As regras que o planejador obedece
 
 1. **Prazo manda.** Peso de cada matéria = proximidade da próxima avaliação.

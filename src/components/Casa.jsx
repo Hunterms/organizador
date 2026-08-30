@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Cat, Trash2, Shirt, Bath, Sofa, Monitor, BedDouble, Plus, X } from 'lucide-react';
+import { Check, Cat, Trash2, Shirt, Bath, Sofa, Monitor, BedDouble, Plus, X, Dumbbell, Activity, Sprout, Sparkles } from 'lucide-react';
 import {
   getDateKey,
   updateHomeRoutine as updateHomeRoutineDb,
@@ -22,7 +22,7 @@ const defaultRooms = [
   { key: 'lixo_reciclavel', label: 'Descer lixo reciclavel', icon: 'Trash2', color: 'text-emerald-400' },
 ];
 
-const iconMap = { Cat, Trash2, Shirt, Bath, Sofa, Monitor, BedDouble };
+const iconMap = { Cat, Trash2, Shirt, Bath, Sofa, Monitor, BedDouble, Dumbbell, Activity, Sprout, Sparkles };
 const dayNames = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 const dayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
 const iconColorOptions = [
