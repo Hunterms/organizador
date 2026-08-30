@@ -3,7 +3,7 @@ import {
   getDateKey, getTodayReviews,
   updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb, markTopicStudied, intervaloCepeda, updateTopic as updateTopicDb,
 } from '../store';
-import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play, Shield, ChevronRight, CalendarClock, Loader2 } from 'lucide-react';
+import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play, Shield, ChevronRight, CalendarClock, Loader2, MapPin } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -112,6 +112,8 @@ function SortableTask({ task, onToggle, onDelete, onEdit, onFocus, onGuide }) {
       {/* Row 2: tags + actions */}
       <div className="flex items-center gap-1.5 flex-wrap pl-1">
         {task.time && <span className="text-[10px] text-zinc-600 flex items-center gap-0.5"><Clock size={9} aria-hidden="true" /> {task.time}</span>}
+        {/* Lugar do bloco: sem ele a implementation intention fica so com hora. */}
+        {task.place && <span className="text-[10px] text-zinc-600 flex items-center gap-0.5"><MapPin size={9} aria-hidden="true" /> {task.place}</span>}
         <span className={`tag tag-${task.category} capitalize`}>{task.category}</span>
         <span className={`effort effort-${task.effort}`}>{effortLabel[task.effort] || '30m'}</span>
         <div className="ml-auto flex items-center gap-0.5">

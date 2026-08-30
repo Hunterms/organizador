@@ -184,7 +184,7 @@ function escolheTopico(subject, novo, usados, alvo, hoje) {
  *
  * budget: minutos disponiveis por dia da semana, indice 0=domingo.
  */
-export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoEstudo = {}, morningDays = []) {
+export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoEstudo = {}, morningDays = [], lugar = '') {
   const ativas = (subjects || []).filter(s => (s.topics || []).length || (s.exams || []).length);
   if (!ativas.length) return [];
 
@@ -317,6 +317,7 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
           ? 'Retrieval: feche o material e escreva de memoria o conceito e um exemplo. So depois confira, e anote so o que faltou.'
           : METODOS[tipo][novo ? 'novo' : 'recuperacao'],
         minutes: BLOCO_MIN,
+        place: lugar || '',
         // Alvo recalculado NA DATA DO BLOCO: estudar quinta apontando pra prova
         // de terca e mentira. Depois da avaliacao o bloco passa a mirar a proxima.
         alvo: (() => {

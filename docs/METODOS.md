@@ -313,9 +313,16 @@ exposição.
 Leroy mediu que quem escreve o plano de retomada carrega menos resíduo de
 atenção. Agora fechar um bloco de estudo pede essa linha, e ela fica no tópico.
 
-**A implementation intention está pela metade.** Gollwitzer pede gatilho, hora
-**e lugar**. O bloco tem hora e não tem lugar. Fica registrado como dívida: é o
-único dos três que continua aberto.
+**A implementation intention estava pela metade, e foi fechada.** Gollwitzer
+pede gatilho, hora **e lugar**, e o bloco só tinha hora. Agora todo bloco de
+estudo nasce com lugar (o escritório), a aula carrega a sala de verdade em vez
+de enfiá-la no título, e o treino aponta a academia ou o estúdio. O push mostra
+os três juntos, que é a forma que a meta-análise mediu: **d = 0,65** sobre
+atingir a meta, em 94 testes independentes.
+
+O lugar é um só de propósito. O valor dele não está em ser o lugar certo, está
+em ser **sempre o mesmo**: Wood e Neal descrevem hábito como associação entre
+contexto e resposta, e contexto que muda não associa nada.
 
 ## 5. As regras que o planejador obedece
 

@@ -145,7 +145,7 @@ async function sleepPrefs(admin: Admin, uid: string) {
 async function materializeRoutine(admin: Admin, userId: string, today: string) {
   const dow = weekday(today);
   const [{ data: routine }, { data: custom }, { data: existing }] = await Promise.all([
-    admin.from("home_routine").select("room_key, days, category, time, effort, interval_weeks, week_offset").eq("user_id", userId),
+    admin.from("home_routine").select("room_key, days, category, time, effort, interval_weeks, week_offset, place").eq("user_id", userId),
     admin.from("custom_rooms").select("key, label").eq("user_id", userId),
     admin.from("tasks").select("title").eq("user_id", userId).eq("date", today),
   ]);
@@ -166,7 +166,7 @@ async function materializeRoutine(admin: Admin, userId: string, today: string) {
     if (!title || have.has(title.toLowerCase())) continue;
     have.add(title.toLowerCase());
     rows.push({ user_id: userId, title, category: r.category ?? "casa", effort: r.effort ?? "30",
-                time: r.time ?? null, done: false, date: today, recurring: true });
+                time: r.time ?? null, place: r.place ?? null, done: false, date: today, recurring: true });
   }
   if (rows.length) await admin.from("tasks").insert(rows);
 }
@@ -225,7 +225,7 @@ async function runTimed(admin: Admin) {
   const { date: today, minutes: nowMin } = nowLocal();
   const hour = Math.floor(nowMin / 60);
   const { data: tasks } = await admin
-    .from("tasks").select("id, user_id, title, time, category, subject_id")
+    .from("tasks").select("id, user_id, title, time, category, subject_id, place")
     .eq("date", today).eq("done", false).is("reminded_at", null).not("time", "is", null);
   const prefsCache: Record<string, { wake: number; sleep: number }> = {};
   let delivered = 0;
@@ -240,8 +240,13 @@ async function runTimed(admin: Admin) {
     const { wake, sleep } = prefsCache[t.user_id];
     if (!(hour >= wake && hour < sleep)) continue; // silencio durante o sono
     const res = await deliver(admin, [t.user_id], t.category === "aula"
-      ? { title: `${t.title} as ${t.time}`, body: `Comeca em ${diff} min. Hora de sair.`, url: "/", tag: `task-${t.id}` }
-      : { title: `Em breve: ${t.title}`, body: `${t.time}${t.category ? " · " + t.category : ""}`, url: "/", tag: `task-${t.id}` });
+      ? { title: `${t.title} as ${t.time}`,
+          body: `Comeca em ${diff} min. Hora de sair.${t.place ? " Sala " + t.place + "." : ""}`,
+          url: "/", tag: `task-${t.id}` }
+      // Gatilho, hora e lugar juntos: e a forma que Gollwitzer mediu.
+      : { title: `Em breve: ${t.title}`,
+          body: `${t.time}${t.place ? " · " + t.place : ""}${t.category ? " · " + t.category : ""}`,
+          url: "/", tag: `task-${t.id}` });
     await admin.from("tasks").update({ reminded_at: new Date().toISOString() }).eq("id", t.id);
     delivered += res.sent;
   }
