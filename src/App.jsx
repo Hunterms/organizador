@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Component } from 'react';
-import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey, ensureTodayRoutineTasks, updateProfile as updateProfileDb } from './store';
+import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey, ensureTodayRoutineTasks, updateProfile as updateProfileDb, ensureWeekPlanTasks, ensureTodayClassTasks } from './store';
 import { buildCircularTask } from './lib/circular';
 import { useAuth } from './lib/auth';
 import Login from './components/Login';
@@ -72,6 +72,30 @@ function OrganizadorApp() {
         // Auto-drop today's home routine onto the day board, once per day.
         // Dedupes against existing casa tasks, so it can't double up; the
         // per-day flag stops it from re-adding items the user deleted today.
+        // Plano da semana: nasce no domingo e cobre domingo a sabado.
+        // Mesma trava por chave da rotina de casa, so que semanal — se voce
+        // apagar blocos, ele nao volta a criar tudo de novo no mesmo domingo.
+        if (new Date().getDay() === 0) {
+          const weekFlag = 'weekplan_gen_' + getDateKey();
+          if (!localStorage.getItem(weekFlag)) {
+            try {
+              const blocos = await ensureWeekPlanTasks(user.id, data);
+              if (blocos.length) setState(prev => ({ ...prev, tasks: [...prev.tasks, ...blocos] }));
+              localStorage.setItem(weekFlag, '1');
+            } catch (e) { console.error('weekplan auto-gen failed:', e); }
+          }
+        }
+
+        // Aulas de hoje viram tarefa com horario (o push de 1h antes le tasks.time).
+        const aulaFlag = 'aulas_gen_' + getDateKey();
+        if (!localStorage.getItem(aulaFlag)) {
+          try {
+            const aulas = await ensureTodayClassTasks(user.id, data);
+            if (aulas.length) setState(prev => ({ ...prev, tasks: [...prev.tasks, ...aulas] }));
+            localStorage.setItem(aulaFlag, '1');
+          } catch (e) { console.error('class task auto-gen failed:', e); }
+        }
+
         const dayFlag = 'routine_gen_' + getDateKey();
         if (!localStorage.getItem(dayFlag)) {
           try {
@@ -94,6 +118,17 @@ function OrganizadorApp() {
 
   // Manual "Rotina casa" button in Hoje. Same materialization as the auto-run,
   // so custom rooms get real titles and everything persists + dedupes.
+  // Botao "Plano da semana" em Hoje. Mesma geracao do domingo, sob demanda:
+  // serve pra refazer depois de mudar prova, topico ou orcamento.
+  const generateWeekPlan = useCallback(async () => {
+    if (!user) return;
+    try {
+      const blocos = await ensureWeekPlanTasks(user.id, state);
+      if (blocos.length) setState(prev => ({ ...prev, tasks: [...prev.tasks, ...blocos] }));
+      return blocos.length;
+    } catch (e) { console.error('generateWeekPlan failed:', e); return 0; }
+  }, [user, state]);
+
   const generateRoutine = useCallback(async () => {
     if (!user) return;
     try {
@@ -250,7 +285,7 @@ function OrganizadorApp() {
   const renderTab = () => {
     const p = { state, updateState, userId: user?.id };
     switch (activeTab) {
-      case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} onGenerateRoutine={generateRoutine} onFocusTask={focusTask} />;
+      case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} onGenerateRoutine={generateRoutine} onGenerateWeekPlan={generateWeekPlan} onFocusTask={focusTask} />;
       case 'estudos': return <Estudos {...p} />;
       case 'pomodoro': return <Pomodoro {...p} preselectKey={focusPreselect} onPreselectConsumed={() => setFocusPreselect(null)} />;
       case 'agua': return <Agua {...p} />;

@@ -217,24 +217,54 @@ async function runTimed(admin: Admin) {
   const { date: today, minutes: nowMin } = nowLocal();
   const hour = Math.floor(nowMin / 60);
   const { data: tasks } = await admin
-    .from("tasks").select("id, user_id, title, time, category")
+    .from("tasks").select("id, user_id, title, time, category, subject_id")
     .eq("date", today).eq("done", false).is("reminded_at", null).not("time", "is", null);
   const prefsCache: Record<string, { wake: number; sleep: number }> = {};
   let delivered = 0;
   for (const t of tasks ?? []) {
     if (!t.time) continue;
     const diff = parseHHMM(t.time) - nowMin;
-    if (diff > 15 || diff < -2) continue; // only within the 15-min lead window
+    // Aula avisa com 1h de antecedencia: da tempo de sair de casa. O resto
+    // avisa com 15min, que e o suficiente pra trocar de contexto.
+    const lead = t.category === "aula" ? 60 : 15;
+    if (diff > lead || diff < -2) continue;
     if (!prefsCache[t.user_id]) { const p = await sleepPrefs(admin, t.user_id); prefsCache[t.user_id] = { wake: p.wake, sleep: p.sleep }; }
     const { wake, sleep } = prefsCache[t.user_id];
     if (!(hour >= wake && hour < sleep)) continue; // silencio durante o sono
-    const res = await deliver(admin, [t.user_id], {
-      title: `Em breve: ${t.title}`, body: `${t.time}${t.category ? " · " + t.category : ""}`, url: "/", tag: `task-${t.id}`,
-    });
+    const res = await deliver(admin, [t.user_id], t.category === "aula"
+      ? { title: `${t.title} as ${t.time}`, body: `Comeca em ${diff} min. Hora de sair.`, url: "/", tag: `task-${t.id}` }
+      : { title: `Em breve: ${t.title}`, body: `${t.time}${t.category ? " · " + t.category : ""}`, url: "/", tag: `task-${t.id}` });
     await admin.from("tasks").update({ reminded_at: new Date().toISOString() }).eq("id", t.id);
     delivered += res.sent;
   }
   return { job: "timed", delivered };
+}
+
+// 30 min depois da aula terminar, pergunta se ele foi — mas so se ele ainda
+// nao marcou. A notificacao abre o app ja apontando pra materia, e as duas
+// respostas ficam a um toque em AulasHoje.
+async function runPresenca(admin: Admin) {
+  const { date: today, minutes: nowMin } = nowLocal();
+  const { data: tarefas } = await admin
+    .from("tasks").select("id, user_id, title, time, subject_id")
+    .eq("date", today).eq("category", "aula").not("subject_id", "is", null).not("time", "is", null);
+  let delivered = 0;
+  for (const t of tarefas ?? []) {
+    const fim = parseHHMM(t.time!) + 120;          // duracao padrao de 2 horas-aula
+    const desde = nowMin - (fim + 30);
+    if (desde < 0 || desde > 15) continue;          // janela de 15min apos o gatilho
+    const { data: ja } = await admin.from("attendance")
+      .select("id").eq("user_id", t.user_id).eq("subject_id", t.subject_id).eq("date", today).maybeSingle();
+    if (ja) continue;                               // ja respondeu, nao insiste
+    const res = await deliver(admin, [t.user_id], {
+      title: `Voce foi na ${t.title.replace(/^Aula: /, "").split(" · ")[0]}?`,
+      body: "Toque pra marcar presenca ou falta. Aula nao marcada nao entra na conta dos 75%.",
+      url: `/?presenca=${t.subject_id}`,
+      tag: `presenca-${t.subject_id}-${today}`,
+    });
+    delivered += res.sent;
+  }
+  return { job: "presenca", delivered };
 }
 
 // Hourly water reminder — only while awake (between the user's wake and sleep
@@ -280,6 +310,7 @@ Deno.serve(async (req) => {
       if (body.job === "digest") return json(await runDigest(admin));
       if (body.job === "timed") return json(await runTimed(admin));
       if (body.job === "water") return json(await runWater(admin));
+      if (body.job === "presenca") return json(await runPresenca(admin));
       return json({ error: "unknown job" }, 400);
     }
 

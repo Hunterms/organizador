@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import {
-  ChevronDown, ChevronUp, Plus, BookOpen, X, Calendar, FileText,
+  ChevronDown, ChevronUp, Plus, BookOpen, X, Calendar, FileText, CalendarRange,
   AlertTriangle, Clock, Upload, FileUp, Loader2, Lightbulb,
   FlaskConical, Code2, Puzzle, PenLine, Ruler, Repeat, Rocket, Zap,
   Target, CheckCircle2, Timer, ClipboardCheck, Video, Link2,
@@ -21,6 +21,8 @@ import {
 } from '../lib/studyMethods';
 import { computeMedia } from '../lib/grades';
 import RetrievalModal from './RetrievalModal';
+import Presenca from './Presenca';
+import { attendanceLevel, aulasRestantes } from '../lib/attendance';
 
 const statusConfig = {
   not_studied: { label: 'Nao estudei', bg: 'bg-zinc-700', text: 'text-zinc-300', next: 'difficulty' },
@@ -110,6 +112,7 @@ export default function Estudos({ state, updateState, userId }) {
   const [retrievalTarget, setRetrievalTarget] = useState(null);
   const [sessionQueue, setSessionQueue] = useState([]); // remaining pending picks
   const [crunchSubjectId, setCrunchSubjectId] = useState(null); // show plan for this subject
+  const [showPresenca, setShowPresenca] = useState(false);
 
   // Memoized study-methods artifacts
   const todayQueue = useMemo(() => getTodayReviewQueue(state.subjects), [state.subjects]);
@@ -324,6 +327,39 @@ export default function Estudos({ state, updateState, userId }) {
 
   return (
     <div className="section-gap animate-in">
+      {showPresenca && (
+        <Presenca state={state} updateState={updateState} userId={userId} onClose={() => setShowPresenca(false)} />
+      )}
+
+      {/* Presenca em aberto: aula que aconteceu e ninguem marcou nao entra na conta */}
+      {(() => {
+        const pend = (state.subjects || []).reduce(
+          (n, s) => n + attendanceSummary(s, state.attendance, state.settings).unmarked, 0);
+        const semOk = state.settings?.semesterStart && state.settings?.semesterEnd;
+        if (semOk && pend === 0) return null;
+        return (
+          <button onClick={() => setShowPresenca(true)}
+            className="w-full card !bg-amber-500/10 !border-amber-500/25 hover:!bg-amber-500/15 transition-colors text-left">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
+                <CalendarRange size={18} className="text-amber-400" aria-hidden="true" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-semibold text-amber-300 leading-snug">
+                  {semOk ? `${pend} aulas sem presenca marcada` : 'Presenca sem data de semestre'}
+                </p>
+                <p className="text-[11px] text-amber-400/70 mt-1 leading-relaxed">
+                  {semOk
+                    ? 'Enquanto elas ficam em aberto, o limite de 25% nao diz a verdade. Toque pra recuperar.'
+                    : 'Defina comeco e fim do semestre pra saber quantas faltas ainda cabem.'}
+                </p>
+              </div>
+              <ChevronDown size={14} className="text-amber-400 shrink-0 mt-1" aria-hidden="true" />
+            </div>
+          </button>
+        );
+      })()}
+
       {/* Crunch banner: loudest element when an exam is close and progress < 70% */}
       {crunchInfo && (
         <button onClick={() => setCrunchSubjectId(crunchInfo.subject.id)}
@@ -525,22 +561,29 @@ export default function Estudos({ state, updateState, userId }) {
                   )}
 
                   {(() => {
-                    const att = attendanceSummary(subject, state.attendance);
+                    const att = attendanceSummary(subject, state.attendance, state.settings);
                     if (att.slots === 0) return null;
-                    const danger = att.remaining <= 2;
+                    const nivel = attendanceLevel(att);
+                    const danger = nivel === 'perigo' || nivel === 'estourado';
+                    const barra = { ok: 'bg-cyan-500', atencao: 'bg-amber-500',
+                                    perigo: 'bg-orange-500', estourado: 'bg-red-500' }[nivel];
+                    const texto = { ok: 'text-zinc-500', atencao: 'text-amber-400',
+                                    perigo: 'text-orange-400', estourado: 'text-red-400' }[nivel];
                     return (
                       <div className="pt-1">
                         <div className="flex items-center justify-between text-[11px] mb-1.5">
-                          <span className="text-zinc-400">Faltas: <span className="text-white font-medium tabular-nums">{att.absences}</span> / {att.maxMisses}</span>
-                          <span className={danger ? 'text-red-400 font-semibold' : 'text-zinc-500'}>
-                            {att.remaining === 0 ? 'no limite!' : `pode faltar +${att.remaining}`}
+                          <span className="text-zinc-400">Faltas: <span className="text-white font-medium tabular-nums">{att.absences}</span> / {att.maxMisses}h</span>
+                          <span className={`${texto} ${danger ? 'font-semibold' : ''}`}>
+                            {nivel === 'estourado'
+                              ? 'limite estourado'
+                              : `+${att.remaining}h · ${Math.floor(aulasRestantes(att))} aula${Math.floor(aulasRestantes(att)) === 1 ? '' : 's'}`}
                           </span>
                         </div>
                         <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden" role="progressbar" aria-valuenow={att.absences} aria-valuemin={0} aria-valuemax={att.maxMisses}>
-                          <div className={`h-full rounded-full transition-[width] ${danger ? 'bg-red-500' : 'bg-cyan-500'}`}
+                          <div className={`h-full rounded-full transition-[width] ${barra}`}
                             style={{ width: `${att.maxMisses ? Math.min(100, (att.absences / att.maxMisses) * 100) : 0}%` }} />
                         </div>
-                        <p className="text-[10px] text-zinc-600 mt-1.5">Limite de 25% (~{att.totalPlanned} aulas no semestre). Marque presenca no Hoje.</p>
+                        <p className="text-[10px] text-zinc-600 mt-1.5">Limite de 25% de {att.totalPlanned}h no semestre. Marque no Hoje ou em Presenca.</p>
                       </div>
                     );
                   })()}

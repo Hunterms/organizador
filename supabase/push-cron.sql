@@ -28,3 +28,14 @@ select cron.schedule('push-timed', '*/10 * * * *', $$
     body := jsonb_build_object('cron', '__CRON_SECRET__', 'job', 'timed')
   );
 $$);
+
+-- Pergunta de presenca — a cada 15 minutos. O job so dispara pra aula que
+-- terminou ha ~30min e que ainda nao tem presenca marcada.
+select cron.unschedule('push-presenca') where exists (select 1 from cron.job where jobname = 'push-presenca');
+select cron.schedule('push-presenca', '*/15 * * * *', $$
+  select net.http_post(
+    url := 'https://cijuivijuxyrdlvlkulp.supabase.co/functions/v1/send-push',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer __ANON_KEY__', 'apikey', '__ANON_KEY__'),
+    body := jsonb_build_object('cron', '__CRON_SECRET__', 'job', 'presenca')
+  );
+$$);
