@@ -132,6 +132,79 @@ Duas defesas, ambas com evidência:
 O organizador já tem as duas peças: a tarefa com horário é a implementation
 intention, e o campo de anotação no fim do pomodoro é o ritual de fechamento.
 
+## 4b. Hábito, motivação e resiliência
+
+Estas três seções entraram depois da auditoria de 30/08/2026, e cada uma
+derrubou uma decisão que já estava no código.
+
+### O horário tem que ser o mesmo
+
+Lally e colegas acompanharam 96 pessoas por 12 semanas: a mediana até a
+automaticidade foi de **66 dias**, com variação de 18 a 254. Wood e Neal
+descrevem hábito como associação aprendida entre **contexto e resposta**.
+
+A consequência é dura para um planejador: horário que muda todo dia não forma
+hábito nenhum. Cada noite vira uma decisão nova, e decisão nova perde para o
+cansaço. O planejador agora escolhe uma **hora âncora** por semana, a que está
+livre no maior número de dias, e só desvia dela onde a aula ocupa.
+
+Isso se soma às implementation intentions de Gollwitzer e Sheeran, cuja
+meta-análise sobre 94 testes e mais de 8000 participantes achou efeito
+**d = 0,65** sobre atingir a meta. O plano "quando" e "onde" vale mais que a
+intenção "vou estudar".
+
+### Recompensa tem que seguir o aprendizado, não o clique
+
+Gamificação por pontos e medalhas é ambígua na literatura. Cognitive Evaluation
+Theory, dentro da Self-Determination Theory, prevê que recompensa percebida
+como controladora **derruba** motivação intrínseca. Hanus e Fox mediram queda
+em motivação, satisfação e nota final num grupo com medalhas e pontos.
+
+O que separa gamificação que ajuda de gamificação que atrapalha é **o que ela
+premia**. Se o ponto vem por competência, sustenta. Se vem por obediência a uma
+lista, treina caça ao ponto.
+
+Por isso o XP foi reordenado: retrieval practice lidera, foco vem depois,
+tarefa marcada vale pouco e beber água virou simbólico. Antes água valia mais
+que 25 minutos de estudo, o que é exatamente o erro que a teoria prevê.
+
+### O streak não pode ser a única medida
+
+Autocrítica depois de falhar está ligada a **mais** procrastinação, não menos.
+A literatura de autocompaixão (Neff) mostra que tratar o próprio erro com
+dureza aumenta ansiedade e medo de falhar, e leva a metas de desempenho no
+lugar de metas de aprendizado.
+
+Um streak zerado depois de um mês perdido é exatamente esse gatilho. Por isso o
+app passou a mostrar **dias ativos nos últimos 30** ao lado do streak: um número
+que nenhum dia perdido destrói, e que só sobe quando você aparece.
+
+### Metas: específicas e difíceis
+
+Locke e Latham, sobre mais de 400 estudos: meta **específica e difícil** produz
+desempenho maior que "faça o seu melhor". É por isso que o bloco do plano nunca
+diz "estudar EE400": ele diz a matéria, o tópico, o método e a avaliação alvo
+com os dias que faltam.
+
+### Pausa serve pro ânimo, não substitui descanso
+
+Meta-análise de Albulescu e colegas (2022), 22 estudos: micropausas de até 10
+minutos aumentam vigor (d = 0,36) e reduzem fadiga (d = 0,35), mas o efeito
+sobre **desempenho** não foi significativo (d = 0,16), aparecendo só em tarefas
+de menor demanda cognitiva. A meta-regressão mostrou que pausa mais longa rende
+mais.
+
+Tradução honesta: a pausa de 5 minutos do pomodoro serve para você aguentar a
+sessão, não para você render mais nela. Recuperar de estudo pesado precisa de
+mais que 10 minutos, e o que recupera de verdade é dormir.
+
+### Dormir depois de estudar é parte do estudo
+
+Sono consolida memória declarativa, e o efeito é maior quando o sono vem logo
+depois do aprendizado. Seus blocos de dia útil caem entre 19h e 22h, o que
+coloca o estudo perto do sono por acidente feliz. Vale preservar: virar a noite
+depois de estudar joga fora parte do que foi estudado.
+
 ## 5. As regras que o planejador obedece
 
 1. **Prazo manda.** Peso de cada matéria = proximidade da próxima avaliação.

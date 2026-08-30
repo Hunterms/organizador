@@ -50,6 +50,7 @@ export default function Progresso({ state, onClose }) {
           </div>
           <div className="flex-1 flex flex-col items-end gap-1.5">
             <span className="text-[12px] text-zinc-400 flex items-center gap-1.5"><Trophy size={12} className="text-amber-400" aria-hidden="true" /> recorde {stats.best}</span>
+            <span className="text-[12px] text-zinc-400">· {stats.ativos30} dias ativos em 30</span>
             <span className="text-[12px] text-zinc-400 flex items-center gap-1.5">
               <Shield size={12} className="text-cyan-400" aria-hidden="true" />
               {stats.shieldsLeft}/2 escudos este mes

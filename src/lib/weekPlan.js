@@ -45,9 +45,17 @@ export function urgencia(subject, hoje) {
   return { peso: 100 / (dias + 3), dias, alvo: prox };
 }
 
-// Horario livre de aula naquele dia. Implementation intention precisa de hora
-// marcada, entao o bloco nasce com uma, mesmo que o usuario mude depois.
-function horarioLivre(subject_list, date, jaUsados) {
+// Hora ancora: a MESMA hora todo dia util, sempre que a aula deixar.
+//
+// Lally (2010) e Wood & Neal: automaticidade vem de repetir a resposta no mesmo
+// contexto. Hora que muda todo dia (19h, 17h, 21h, 18h) nao vira habito, vira
+// decisao nova toda noite — e decisao nova perde pro cansaco. Entao escolhemos
+// uma ancora: a hora livre no maior numero de dias, e so desviamos onde a aula
+// ocupa. O mesmo vale pro fim de semana, com sua propria ancora.
+const CAND_UTIL = [19, 20, 21, 18, 17, 22, 16];
+const CAND_FDS = [9, 10, 14, 15, 16, 17];
+
+function ocupacaoDoDia(subject_list, date) {
   const dow = new Date(date + 'T12:00:00').getDay();
   const ocupado = [];
   for (const s of subject_list) {
@@ -57,13 +65,40 @@ function horarioLivre(subject_list, date, jaUsados) {
       ocupado.push([ini, ini + (sl.duration || 120)]);
     }
   }
+  return ocupado;
+}
+
+const horaLivre = (ocupado, h) => {
+  const ini = h * 60;
+  return !ocupado.some(([a, b]) => ini < b && ini + BLOCO_MIN > a);
+};
+
+// Roda uma vez por semana: qual hora serve em mais dias?
+function escolheAncora(subject_list, dias, fimDeSemana) {
+  const cands = fimDeSemana ? CAND_FDS : CAND_UTIL;
+  const alvo = dias.filter(d => {
+    const dow = new Date(d + 'T12:00:00').getDay();
+    return fimDeSemana === (dow === 0 || dow === 6);
+  });
+  if (!alvo.length) return cands[0];
+  let melhor = cands[0], melhorN = -1;
+  for (const h of cands) {
+    const n = alvo.filter(d => horaLivre(ocupacaoDoDia(subject_list, d), h)).length;
+    if (n > melhorN) { melhor = h; melhorN = n; }
+  }
+  return melhor;
+}
+
+// Horario do bloco: ancora primeiro, depois a hora seguinte, depois o resto.
+function horarioLivre(subject_list, date, jaUsados, ancora) {
+  const dow = new Date(date + 'T12:00:00').getDay();
   const fds = dow === 0 || dow === 6;
-  const candidatos = fds ? [9, 10, 14, 15, 16, 17] : [19, 20, 17, 21, 18, 16, 22];
-  for (const h of candidatos) {
-    const ini = h * 60;
-    const fim = ini + BLOCO_MIN;
-    if (jaUsados.has(h)) continue;
-    if (ocupado.some(([a, b]) => ini < b && fim > a)) continue;
+  const base = fds ? CAND_FDS : CAND_UTIL;
+  const ordem = [ancora, ancora + 1, ...base.filter(h => h !== ancora && h !== ancora + 1)];
+  const ocupado = ocupacaoDoDia(subject_list, date);
+  for (const h of ordem) {
+    if (h > 23 || jaUsados.has(h)) continue;
+    if (!horaLivre(ocupado, h)) continue;
     jaUsados.add(h);
     return String(h).padStart(2, '0') + ':00';
   }
@@ -176,6 +211,9 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
     }
   }
 
+  const ancoraUtil = escolheAncora(subjects, dias, false);
+  const ancoraFds = escolheAncora(subjects, dias, true);
+
   const plano = [];
   const topicosUsados = new Set();
   for (let d = 0; d < 7; d++) {
@@ -188,7 +226,7 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
       const topico = escolheTopico(entrada.s, novo, topicosUsados);
       plano.push({
         date,
-        time: horarioLivre(subjects, date, horasUsadas),
+        time: horarioLivre(subjects, date, horasUsadas, novo ? ancoraFds : ancoraUtil),
         subjectId: entrada.s.id,
         code: entrada.s.code || entrada.s.name,
         topic: topico?.name || null,

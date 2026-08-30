@@ -96,3 +96,5 @@ assert.ok(aulasRestantes(bloco4h) < aulasRestantes(aula2h));
 assert.equal(attendanceLevel({ remaining: 3, weekHours: 4, slots: 2, maxMisses: 15 }), 'perigo',
   'MC404 com 3h de folga: uma aula e meia, tem que acender');
 console.log('ok — degraus de cor da falta');
+
+// (o teste de gamificacao vive junto porque roda no mesmo comando)

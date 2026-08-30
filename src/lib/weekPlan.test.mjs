@@ -133,3 +133,16 @@ const p2 = buildWeekPlan(comHistorico, DOM);
 assert.equal(p2[0].topicId, 'novo', 'topico nunca estudado tem que vir antes do ja estudado');
 
 console.log('ok — topico amarrado e ordem por esquecimento');
+
+// --- hora ancora: habito precisa do mesmo contexto (Lally, Wood & Neal) ------
+const horasUteis = plano
+  .filter(b => { const d = new Date(b.date + 'T12:00:00').getDay(); return d >= 1 && d <= 5; })
+  .map(b => b.time).filter(Boolean);
+const contagem = {};
+for (const h of horasUteis) contagem[h] = (contagem[h] || 0) + 1;
+const maisComum = Math.max(...Object.values(contagem));
+assert.ok(maisComum >= 4,
+  `a ancora tem que repetir em pelo menos 4 blocos de dia util, repetiu ${maisComum}: ${JSON.stringify(contagem)}`);
+assert.ok(Object.keys(contagem).length <= 3,
+  `dia util nao pode espalhar por mais de 3 horarios diferentes, espalhou ${Object.keys(contagem).length}`);
+console.log('ok — hora ancora, mais comum aparece', maisComum, 'vezes em', Object.keys(contagem).length, 'horarios');
