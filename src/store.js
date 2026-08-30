@@ -79,7 +79,7 @@ export async function fetchAllData(userId) {
   // Home routine as map { room_key: { days: [...] } }
   const routineMap = {};
   (homeRoutine || []).forEach(r => { routineMap[r.room_key] = {
-    days: r.days, category: r.category || 'casa', time: r.time || '', effort: r.effort || '30',
+    days: r.days, category: r.category || 'casa', time: r.time || '', effort: r.effort || '30', place: r.place || '',
     interval_weeks: r.interval_weeks || 1, week_offset: r.week_offset || 0,
   }; });
 
@@ -170,6 +170,7 @@ export async function fetchAllData(userId) {
       guide_id: t.guide_id || null,
       topic_id: t.topic_id || null,
       subject_id: t.subject_id || null,
+      place: t.place || '',
     })),
     subjects: subjectsWithChildren,
     kanban,
@@ -186,6 +187,7 @@ export async function fetchAllData(userId) {
       sleepHour: profile?.sleep_hour ?? 22,
       semesterStart: profile?.semester_start || '',
       semesterEnd: profile?.semester_end || '',
+      studyPlace: profile?.study_place || '',
       morningDays: profile?.morning_days || [],
     },
     pomodoroSettings: profile?.pomodoro_settings || defaultState.pomodoroSettings,
@@ -211,6 +213,7 @@ export async function createTask(userId, task) {
   if (task.guide_id) payload.guide_id = task.guide_id;
   if (task.topic_id) payload.topic_id = task.topic_id;
   if (task.subject_id) payload.subject_id = task.subject_id;
+  if (task.place) payload.place = task.place;
   const { data, error } = await supabase.from('tasks').insert(payload).select().single();
   if (error) throw error;
   return { id: data.id, ...task };
@@ -476,7 +479,7 @@ export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, cust
     try {
       const saved = await createTask(userId, {
         title, category: cfg.category || 'casa', effort: cfg.effort || '30', time: cfg.time || '',
-        done: false, date: today, recurring: true,
+        done: false, date: today, recurring: true, place: cfg.place || '',
       });
       created.push(saved);
       existing.add(title.toLowerCase());
@@ -504,13 +507,14 @@ export async function ensureTodayClassTasks(userId, { tasks, subjects, settings 
     for (const c of classDates(s, today, today)) {
       const title = s.attends === false
         ? `${s.code || s.name}: exercicios da semana (janela de 2x pontos)`
-        : `Aula: ${s.code || s.name}${c.room ? ' · ' + c.room : ''}`;
+        : `Aula: ${s.code || s.name}`;
       if (existentes.has(title.toLowerCase())) continue;
       try {
         const saved = await createTask(userId, {
           title, category: 'aula', effort: '120', time: c.time,
           done: false, date: today, recurring: false, subject_id: s.id,
           required_pomodoros: s.attends === false ? 4 : 0,
+          place: c.room || '',
         });
         criadas.push(saved);
         existentes.add(title.toLowerCase());
@@ -569,6 +573,7 @@ export async function updateProfile(userId, updates) {
   if ('semesterStart' in updates) dbUpdates.semester_start = updates.semesterStart || null;
   if ('semesterEnd' in updates) dbUpdates.semester_end = updates.semesterEnd || null;
   if ('morningDays' in updates) dbUpdates.morning_days = updates.morningDays || [];
+  if ('studyPlace' in updates) dbUpdates.study_place = updates.studyPlace || null;
   if ('pomodoroSettings' in updates) dbUpdates.pomodoro_settings = updates.pomodoroSettings;
   const { error } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
   if (error) throw error;
@@ -915,7 +920,7 @@ async function ensureMethodGuide(userId, cache, bloco) {
 }
 
 export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) {
-  const plano = buildWeekPlan(state.subjects, inicio, weekBudget(state.settings), {}, state.settings?.morningDays || []);
+  const plano = buildWeekPlan(state.subjects, inicio, weekBudget(state.settings), {}, state.settings?.morningDays || [], state.settings?.studyPlace || '');
   if (!plano.length) return [];
   // Dedupe por data+MATERIA, nao por titulo. Titulo carrega o topico escolhido,
   // e duas geracoes do mesmo domingo podem escolher topicos diferentes: o
@@ -942,6 +947,7 @@ export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) 
         title, category: 'estudos', effort: '60', time: b.time,
         done: false, date: b.date, recurring: false,
         required_pomodoros: pomodorosPorBloco, guide_id, topic_id: b.topicId || null,
+        place: b.place || '',
       });
       criadas.push({ ...saved, guide_id });
       ocupado.add(`${b.date}|${b.subjectId}`);

@@ -257,3 +257,12 @@ assert.equal(pr[0].topicId, 'vence', 'revisao vencida tem que vir antes de conte
 assert.equal(pr[0].kind, 'revisao', 'e o bloco tem que ser marcado como revisao');
 assert.ok(/Retrieval/.test(pr[0].method), 'com metodo de retrieval, nao de exposicao');
 console.log('ok — Cepeda e revisao vencida no topo');
+
+// --- todo bloco tem lugar quando o lugar esta configurado -------------------
+const comLugar = buildWeekPlan(S, DOM, undefined, {}, [], 'escritorio');
+for (const b of comLugar) {
+  assert.equal(b.place, 'escritorio', `${b.date} ${b.code} saiu sem lugar`);
+}
+// Sem configurar, o campo vem vazio em vez de undefined (evita "undefined" na tela).
+assert.ok(buildWeekPlan(S, DOM).every(b => b.place === ''), 'sem lugar configurado o campo vem vazio');
+console.log('ok — lugar em todo bloco');
