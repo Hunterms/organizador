@@ -266,3 +266,27 @@ for (const b of comLugar) {
 // Sem configurar, o campo vem vazio em vez de undefined (evita "undefined" na tela).
 assert.ok(buildWeekPlan(S, DOM).every(b => b.place === ''), 'sem lugar configurado o campo vem vazio');
 console.log('ok — lugar em todo bloco');
+
+// --- compromisso fixo bloqueia horario sem receber bloco --------------------
+// Entra como "materia" sem topico e sem prova: ocupacaoDoDia le o horario dela,
+// mas a distribuicao so considera quem tem topico ou prova.
+const terreiro = { id: '__ocupado', code: '', topics: [], exams: [],
+  class_schedule: [{ day: 6, time: '16:00', duration: 420 }] };
+const comTerreiro = buildWeekPlan([...S, terreiro], DOM);
+const sabado = comTerreiro.filter(b => b.date === '2026-09-05');
+assert.ok(sabado.length > 0, 'o sabado nao pode ficar vazio');
+for (const b of sabado) {
+  const h = Number(b.time.slice(0, 2));
+  assert.ok(h < 16 || h >= 23, `bloco de sabado as ${b.time} cai dentro do terreiro`);
+}
+assert.ok(!comTerreiro.some(b => b.subjectId === '__ocupado'),
+  'compromisso fixo nao pode receber bloco de estudo');
+assert.equal(comTerreiro.length, plano.length, 'bloquear o sabado nao pode perder bloco');
+console.log('ok — compromisso fixo bloqueia sem consumir');
+
+// --- folga antes de um compromisso fixo -------------------------------------
+const sab = comTerreiro.filter(b => b.date === '2026-09-05').map(b => b.time).sort();
+const ultimoFim = Number(sab[sab.length - 1].slice(0, 2)) * 60 + 50;
+assert.ok(16 * 60 - ultimoFim >= 60,
+  `so ${16 * 60 - ultimoFim} min entre o ultimo bloco (${sab[sab.length - 1]}) e o terreiro`);
+console.log('ok — folga de', 16 * 60 - ultimoFim, 'min antes do compromisso');

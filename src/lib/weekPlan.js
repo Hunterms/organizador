@@ -85,7 +85,10 @@ export function urgencia(subject, hoje) {
 // noite ja encheu. Acordar cedo custa, e o custo so se paga com prova amanha.
 const CAND_UTIL = [19, 20, 21, 18, 17, 22, 16, 15, 10, 9, 8];
 const HORA_MANHA = 8;
-const CAND_FDS = [9, 10, 14, 15, 16, 17];
+// 11h entra antes das tardes: com o terreiro comecando 16h no sabado, encher
+// ate as 15h deixava 10 minutos pra sair. Tres blocos de manha e um a tarde
+// abrem 70 minutos de folga antes do compromisso.
+const CAND_FDS = [9, 10, 11, 14, 15, 16, 17];
 
 function ocupacaoDoDia(subject_list, date) {
   const dow = new Date(date + 'T12:00:00').getDay();
