@@ -119,7 +119,6 @@ function levelForXp(xp) {
 export function computeStats(state, today = getDateKey()) {
   const tasks = state.tasks || [];
   const feitas = tasks.filter(effectiveDone);
-  const doneTasks = feitas.length;
   const xpTarefas = feitas.reduce((n, t) => n + xpDaTarefa(t), 0);
   const focusSessions = (state.studySessions || []).filter((s) => s.type === 'focus').length;
 
