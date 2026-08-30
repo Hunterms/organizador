@@ -145,9 +145,9 @@ async function sleepPrefs(admin: Admin, uid: string) {
 async function materializeRoutine(admin: Admin, userId: string, today: string) {
   const dow = weekday(today);
   const [{ data: routine }, { data: custom }, { data: existing }] = await Promise.all([
-    admin.from("home_routine").select("room_key, days").eq("user_id", userId),
+    admin.from("home_routine").select("room_key, days, category, time, effort").eq("user_id", userId),
     admin.from("custom_rooms").select("key, label").eq("user_id", userId),
-    admin.from("tasks").select("title").eq("user_id", userId).eq("date", today).eq("category", "casa"),
+    admin.from("tasks").select("title").eq("user_id", userId).eq("date", today),
   ]);
   const have = new Set((existing ?? []).map((t: { title: string }) => t.title.toLowerCase()));
   const labelOf = (key: string) =>
@@ -158,7 +158,8 @@ async function materializeRoutine(admin: Admin, userId: string, today: string) {
     const title = labelOf(r.room_key);
     if (!title || have.has(title.toLowerCase())) continue;
     have.add(title.toLowerCase());
-    rows.push({ user_id: userId, title, category: "casa", effort: "30", time: null, done: false, date: today, recurring: true });
+    rows.push({ user_id: userId, title, category: r.category ?? "casa", effort: r.effort ?? "30",
+                time: r.time ?? null, done: false, date: today, recurring: true });
   }
   if (rows.length) await admin.from("tasks").insert(rows);
 }

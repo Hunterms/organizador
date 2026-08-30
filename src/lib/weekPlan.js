@@ -34,7 +34,12 @@ const METODOS = {
   },
 };
 
-// Peso por prazo (docs/METODOS.md regra 1). Prova amanha vale ~8x uma em 60 dias.
+// Peso por TAXA EXIGIDA, nao por proximidade (docs/METODOS.md regra 1).
+//
+// Proximidade sozinha engana. A P1 de EE400 pede 6 topicos em 9 dias; a de
+// EA513 pede 12 em 18. E a mesma taxa de 0,67 por dia, mas um peso 1/dias dava
+// 1,7x mais blocos a EE400 e deixava EA513 chegar na prova com 8 de 12.
+// O peso agora e "quanto conteudo por dia falta", que e o que a prova cobra.
 export function urgencia(subject, hoje) {
   const futuras = (subject.exams || [])
     .filter(e => e.date >= hoje && e.status !== 'feita')
@@ -42,7 +47,16 @@ export function urgencia(subject, hoje) {
   if (!futuras.length) return { peso: 1, dias: null, alvo: null };
   const prox = futuras[0];
   const dias = Math.round((new Date(prox.date + 'T12:00:00') - new Date(hoje + 'T12:00:00')) / 86400000);
-  return { peso: 100 / (dias + 3), dias, alvo: prox };
+  const todos = subject.topics || [];
+  const naFaixa = prox.covers_from != null
+    ? todos.filter(t => t.position >= prox.covers_from && t.position <= prox.covers_to)
+    : todos;
+  const restantes = naFaixa.filter(t => t.status !== 'mastered').length;
+  // Sem topico pendente a materia entra em manutencao, nao some.
+  const taxa = restantes ? (restantes / Math.max(dias, 1)) * 100 : 5;
+  // Prazo de 2 dias ou menos ainda ganha um empurrao: cobrir vence distribuir.
+  const colado = dias <= 2 ? 3 : 1;
+  return { peso: taxa * colado, dias, alvo: prox, restantes };
 }
 
 // Hora ancora: a MESMA hora todo dia util, sempre que a aula deixar.
@@ -52,7 +66,9 @@ export function urgencia(subject, hoje) {
 // decisao nova toda noite — e decisao nova perde pro cansaco. Entao escolhemos
 // uma ancora: a hora livre no maior numero de dias, e so desviamos onde a aula
 // ocupa. O mesmo vale pro fim de semana, com sua propria ancora.
-const CAND_UTIL = [19, 20, 21, 18, 17, 22, 16];
+// As tres ultimas sao ultimo recurso: so entram em dia de crunch, quando a
+// noite ja encheu. Acordar cedo custa, e o custo so se paga com prova amanha.
+const CAND_UTIL = [19, 20, 21, 18, 17, 22, 16, 15, 10, 9, 8];
 const HORA_MANHA = 8;
 const CAND_FDS = [9, 10, 14, 15, 16, 17];
 
@@ -92,39 +108,54 @@ function escolheAncora(subject_list, dias, fimDeSemana) {
   return melhor;
 }
 
-// Horario do bloco: ancora primeiro, depois a hora seguinte, depois o resto.
-function horarioLivre(subject_list, date, jaUsados, ancora) {
+// Todos os horarios do dia de uma vez, DEVOLVIDOS EM ORDEM DE RELOGIO.
+// Escolher um por vez e depois ordenar inverte o conteudo: a vespera da A1
+// saia com U4 as 16h e U0 as 18h, ou seja, estudando de tras pra frente.
+function horariosDoDia(subject_list, date, n, ancora, manha) {
+  if (n <= 0) return [];
   const dow = new Date(date + 'T12:00:00').getDay();
   const fds = dow === 0 || dow === 6;
   const base = fds ? CAND_FDS : CAND_UTIL;
-  const ordem = [ancora, ancora + 1, ...base.filter(h => h !== ancora && h !== ancora + 1)];
+  const ordem = manha
+    ? [HORA_MANHA, ancora, ancora + 1, ...base.filter(h => h !== ancora && h !== ancora + 1)]
+    : [ancora, ancora + 1, ...base.filter(h => h !== ancora && h !== ancora + 1)];
   const ocupado = ocupacaoDoDia(subject_list, date);
+  const achadas = [];
   for (const h of ordem) {
-    if (h > 23 || jaUsados.has(h)) continue;
-    if (!horaLivre(ocupado, h)) continue;
-    jaUsados.add(h);
-    return String(h).padStart(2, '0') + ':00';
+    if (achadas.length >= n) break;
+    if (h > 23 || achadas.includes(h)) continue;
+    if (horaLivre(ocupado, h)) achadas.push(h);
   }
-  return '';
+  return achadas.sort((a, b) => a - b).map(h => String(h).padStart(2, '0') + ':00');
 }
 
 // Escolhe o topico do bloco. Fim de semana puxa o que nunca foi estudado;
 // dia util puxa o que ficou marcado como dificuldade, que e onde o retrieval
 // rende mais. Topico ja usado nesta semana so volta se nao sobrar outro.
-function escolheTopico(subject, novo, usados) {
-  const topics = subject.topics || [];
-  const livre = t => !usados.has(t.id);
+function escolheTopico(subject, novo, usados, alvo) {
+  const todos = subject.topics || [];
+  if (!todos.length) return null;
+  // A prova manda no assunto, nao so na urgencia. A P1 de EE400 cobre a Parte I
+  // (positions 10-19); estudar Series (30-39) na semana dela e trabalho jogado
+  // fora. Quando a faixa acaba, o bloco REVISA dentro dela em vez de sair:
+  // retrieval no conteudo que cai vale mais que conteudo novo que nao cai.
+  const naFaixa = (alvo && alvo.covers_from != null)
+    ? todos.filter(t => t.position >= alvo.covers_from && t.position <= alvo.covers_to)
+    : [];
+  const pool = naFaixa.length ? naFaixa : todos;
+
   const ordem = novo
     ? [t => t.status === 'not_studied', t => t.status === 'difficulty', () => true]
     : [t => t.status === 'difficulty', t => t.status === 'not_studied', () => true];
   for (const filtro of ordem) {
     // Dentro do mesmo balde, o mais esquecido primeiro. Topico nunca tocado
     // (sem last_studied) vem antes de todos.
-    const achou = topics.filter(t => filtro(t) && livre(t))
+    const achou = pool.filter(t => filtro(t) && !usados.has(t.id))
       .sort((a, b) => (a.last_studied || '').localeCompare(b.last_studied || ''))[0];
     if (achou) { usados.add(achou.id); return achou; }
   }
-  return null;
+  // Faixa esgotada na semana: repete o mais esquecido dela como revisao.
+  return pool.slice().sort((a, b) => (a.last_studied || '').localeCompare(b.last_studied || ''))[0] || null;
 }
 
 /**
@@ -186,10 +217,14 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
   // blocos da mesma materia no mesmo dia). O que sobra do teto volta pra fila.
   let sobrou = 0;
   for (const i of info) {
-    if (i.cota > 7) { sobrou += i.cota - 7; i.cota = 7; }
+    // Teto de 7: regra 4 impede dois blocos da mesma materia no mesmo dia.
+    // Teto de topicos: mais blocos que topicos produz bloco sem assunto, que e
+    // o "estudar EE400" vago que Locke e Latham derrubam.
+    const teto = Math.min(7, (i.s.topics || []).length || 7);
+    if (i.cota > teto) { sobrou += i.cota - teto; i.cota = teto; }
   }
   while (sobrou > 0) {
-    const alvo = info.find(i => i.cota < 7);
+    const alvo = info.find(i => i.cota < Math.min(7, (i.s.topics || []).length || 7));
     if (!alvo) break;
     alvo.cota += 1; sobrou -= 1;
   }
@@ -203,8 +238,16 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
   for (let d = 0; d < 7; d++) {
     const noDia = new Set();
     for (let b = 0; b < blocosPorDia[d]; b++) {
+      // Regra 4 (uma materia por dia) cede quando a avaliacao e hoje ou amanha:
+      // com prazo colado, cobrir o conteudo vence distribuir o esforco. A
+      // urgencia e medida na data DO DIA, senao o crunch vazaria pra semana toda.
+      const crunch = bolsa.filter(x => {
+        if (x.cota <= 0) return false;
+        const u = urgencia(x.s, dias[d]);
+        return u.dias !== null && u.dias <= 1;
+      });
       const livres = bolsa.filter(x => x.cota > 0 && !noDia.has(x.s.id));
-      const pool = livres.length ? livres : bolsa.filter(x => x.cota > 0);
+      const pool = crunch.length ? crunch : (livres.length ? livres : bolsa.filter(x => x.cota > 0));
       if (!pool.length) break;
       pool.sort((a, b2) => b2.cota - a.cota || b2.peso - a.peso);
       const escolhido = pool[0];
@@ -227,19 +270,21 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
     // porque antes do trabalho a cabeca rende pra aprender. Ele SUBSTITUI um
     // bloco da noite, nao soma: o orcamento da semana continua o mesmo.
     const temManha = morningDays.includes(dow) && !fds;
-    const horasUsadas = new Set();
-    let primeiro = true;
-    for (const { entrada } of alocados.filter(a => a.d === d)) {
-      const naManha = temManha && primeiro;
-      primeiro = false;
+    const doDia = alocados.filter(a => a.d === d);
+    const horarios = horariosDoDia(subjects, date, doDia.length,
+      fds ? ancoraFds : ancoraUtil, temManha);
+    let idx = 0;
+    for (const { entrada } of doDia) {
+      const hora = horarios[idx] || '';
+      const naManha = temManha && idx === 0 && hora === '08:00';
+      idx++;
       const novo = fds || naManha;
       const tipo = tipoDe(entrada.s);
-      const topico = escolheTopico(entrada.s, novo, topicosUsados);
+      const uDia = urgencia(entrada.s, date);
+      const topico = escolheTopico(entrada.s, novo, topicosUsados, uDia.alvo);
       plano.push({
         date,
-        time: naManha
-          ? (horasUsadas.add(HORA_MANHA), String(HORA_MANHA).padStart(2, '0') + ':00')
-          : horarioLivre(subjects, date, horasUsadas, fds ? ancoraFds : ancoraUtil),
+        time: hora,
         subjectId: entrada.s.id,
         code: entrada.s.code || entrada.s.name,
         topic: topico?.name || null,

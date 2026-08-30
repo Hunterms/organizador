@@ -76,7 +76,9 @@ export async function fetchAllData(userId) {
 
   // Home routine as map { room_key: { days: [...] } }
   const routineMap = {};
-  (homeRoutine || []).forEach(r => { routineMap[r.room_key] = { days: r.days }; });
+  (homeRoutine || []).forEach(r => { routineMap[r.room_key] = {
+    days: r.days, category: r.category || 'casa', time: r.time || '', effort: r.effort || '30',
+  }; });
 
   // Subjects with embedded topics + exams
   const topicsBySubject = {};
@@ -412,9 +414,13 @@ export async function setWaterLog(userId, date, bottles) {
 }
 
 // Home routine
-export async function updateHomeRoutine(userId, roomKey, days) {
+export async function updateHomeRoutine(userId, roomKey, days, extra = {}) {
+  const row = { user_id: userId, room_key: roomKey, days };
+  if ('category' in extra) row.category = extra.category;
+  if ('time' in extra) row.time = extra.time;
+  if ('effort' in extra) row.effort = extra.effort;
   const { error } = await supabase.from('home_routine')
-    .upsert({ user_id: userId, room_key: roomKey, days }, { onConflict: 'user_id,room_key' });
+    .upsert(row, { onConflict: 'user_id,room_key' });
   if (error) throw error;
 }
 
@@ -451,10 +457,11 @@ export function roomLabelFor(key, customRooms = []) {
 export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, customRooms }) {
   const today = getDateKey();
   const dow = new Date().getDay();
+  // Dedupe por titulo em QUALQUER categoria: a rotina deixou de ser so casa
+  // (pilates e academia entram por aqui), entao filtrar por 'casa' deixaria
+  // passar treino duplicado.
   const existing = new Set(
-    (tasks || [])
-      .filter(t => t.date === today && t.category === 'casa')
-      .map(t => t.title.toLowerCase())
+    (tasks || []).filter(t => t.date === today).map(t => t.title.toLowerCase())
   );
   const created = [];
   for (const [key, cfg] of Object.entries(homeRoutine || {})) {
@@ -463,7 +470,7 @@ export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, cust
     if (!title || existing.has(title.toLowerCase())) continue;
     try {
       const saved = await createTask(userId, {
-        title, category: 'casa', effort: '30', time: '',
+        title, category: cfg.category || 'casa', effort: cfg.effort || '30', time: cfg.time || '',
         done: false, date: today, recurring: true,
       });
       created.push(saved);
