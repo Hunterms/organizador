@@ -7,7 +7,12 @@ import { getDateKey } from '../store';
 const STREAK_THRESHOLD = 0.8;   // 80% of the day's tasks effectively done
 const FOCUS_GOAL_MIN = 50;      // ~2 pomodoros = a "full" focus ring
 const SHIELDS_PER_MONTH = 2;    // auto-saves a missed day, max 2 per calendar month
-const XP = { task: 10, pomodoro: 15, water: 20, retrieval: 25 };
+// XP tem que seguir o que a evidencia diz que ensina, nao o que e facil de
+// clicar. Antes agua valia 20 e um pomodoro de foco valia 15: beber agua rendia
+// mais que 25 minutos de estudo. Retrieval practice e a tecnica de utilidade
+// mais alta (Dunlosky 2013), entao lidera; agua vira simbolica.
+// Ver docs/METODOS.md secao 1.
+const XP = { task: 10, pomodoro: 30, water: 5, retrieval: 50 };
 
 // A task counts as done only when checked AND its pomodoro requirement is met.
 export function effectiveDone(t) {
@@ -57,7 +62,7 @@ export function computeProgress(state, today = getDateKey()) {
   const focus = focusByDate(state);
   const dates = [...Object.keys(byDate), ...Object.keys(focus)];
   const atRisk = !keptDay(byDate, focus, today);
-  if (!dates.length) return { streak: 0, best: 0, shieldsUsed: 0, shieldsLeft: SHIELDS_PER_MONTH, atRisk };
+  if (!dates.length) return { streak: 0, best: 0, shieldsUsed: 0, shieldsLeft: SHIELDS_PER_MONTH, atRisk, ativos30: 0 };
   const start = dates.sort()[0];
   const curMonth = today.slice(0, 7);
   let run = 0, best = 0, curMonthShields = 0, month = null, monthShields = 0;
@@ -70,7 +75,17 @@ export function computeProgress(state, today = getDateKey()) {
     else { run = 0; }
     if (mo === curMonth) curMonthShields = monthShields;
   }
-  return { streak: run, best, shieldsUsed: curMonthShields, shieldsLeft: SHIELDS_PER_MONTH - curMonthShields, atRisk };
+  // Dias ativos nos ultimos 30. Existe porque o streak zera inteiro com uma
+  // falha, e streak zerado depois de um mes ruim vira auto-critica — que a
+  // pesquisa liga a MAIS procrastinacao, nao menos (Neff; Sirois sobre
+  // autocompaixao e procrastinacao). Este numero nao pode ser destruido por um
+  // dia perdido: ele so sobe quando voce aparece.
+  let ativos30 = 0;
+  for (let i = 0, d = today; i < 30; i++, d = prevDay(d)) {
+    if (keptDay(byDate, focus, d)) ativos30++;
+  }
+  return { streak: run, best, shieldsUsed: curMonthShields,
+           shieldsLeft: SHIELDS_PER_MONTH - curMonthShields, atRisk, ativos30 };
 }
 
 // Focus pomodoros + tasks done per day for the last N days (for the chart).

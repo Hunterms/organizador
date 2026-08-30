@@ -1,6 +1,6 @@
 import { supabase } from './lib/supabase';
 import { getDateKey } from './lib/attendance';
-import { buildWeekPlan, tituloBloco } from './lib/weekPlan';
+import { buildWeekPlan, tituloBloco, BLOCO_MIN } from './lib/weekPlan';
 import { classDates } from './lib/attendance';
 
 // ==========================================================================
@@ -894,24 +894,34 @@ async function ensureMethodGuide(userId, cache, bloco) {
 export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) {
   const plano = buildWeekPlan(state.subjects, inicio, weekBudget(state.settings));
   if (!plano.length) return [];
-  // Dedupe por titulo+data: rodar duas vezes no mesmo domingo nao duplica nada.
-  const existentes = new Set((state.tasks || [])
+  // Dedupe por data+MATERIA, nao por titulo. Titulo carrega o topico escolhido,
+  // e duas geracoes do mesmo domingo podem escolher topicos diferentes: o
+  // titulo muda, o bloco duplica, e o dia fica com 5 blocos em vez de 4.
+  // Aconteceu em 30/08/2026, com o app e o servidor gerando o mesmo domingo.
+  const subjectDe = (t) => t.topic_id
+    ? (state.subjects || []).find(s => (s.topics || []).some(x => x.id === t.topic_id))?.id
+    : null;
+  const ocupado = new Set((state.tasks || [])
     .filter(t => t.category === 'estudos')
-    .map(t => `${t.date}|${t.title}`));
+    .map(t => `${t.date}|${subjectDe(t) || t.title}`));
+  // Um bloco de 50min nao fecha com 1 pomodoro de 25. Deriva do foco configurado
+  // em vez de fixar 1, senao da pra marcar o bloco como feito na metade dele.
+  const foco = state.pomodoroSettings?.focusDuration || 25;
+  const pomodorosPorBloco = Math.max(1, Math.round(BLOCO_MIN / foco));
   const guias = new Map();
   const criadas = [];
   for (const b of plano) {
     const title = tituloBloco(b);
-    if (existentes.has(`${b.date}|${title}`)) continue;
+    if (ocupado.has(`${b.date}|${b.subjectId}`) || ocupado.has(`${b.date}|${title}`)) continue;
     try {
       const guide_id = await ensureMethodGuide(userId, guias, b);
       const saved = await createTask(userId, {
         title, category: 'estudos', effort: '60', time: b.time,
         done: false, date: b.date, recurring: false,
-        required_pomodoros: 1, guide_id, topic_id: b.topicId || null,
+        required_pomodoros: pomodorosPorBloco, guide_id, topic_id: b.topicId || null,
       });
       criadas.push({ ...saved, guide_id });
-      existentes.add(`${b.date}|${title}`);
+      ocupado.add(`${b.date}|${b.subjectId}`);
     } catch (e) { console.error('bloco do plano falhou:', title, e); }
   }
   return criadas;
