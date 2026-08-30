@@ -205,6 +205,24 @@ depois do aprendizado. Seus blocos de dia útil caem entre 19h e 22h, o que
 coloca o estudo perto do sono por acidente feliz. Vale preservar: virar a noite
 depois de estudar joga fora parte do que foi estudado.
 
+## 4c. Matéria que não se frequenta
+
+Nem toda aula na grade é aula que ele vai. Três casos, e o app trata cada um
+diferente:
+
+- **Frequenta** (MC426, MC404, MC919, MS211): conta falta, vira tarefa com
+  lembrete de 1h antes, e o horário bloqueia o planejador.
+- **Não frequenta** (EE400): não conta falta, não vira tarefa, e o horário
+  **libera** para estudo. O alerta de 75% some, porque um limite que não vale
+  é pior que nenhum.
+- **Não frequenta, mas o horário é janela de entrega** (MC621): não conta falta,
+  mas o horário vira bloco de trabalho fixo.
+
+O caso do MC621 vale explicar. O PDD paga **2 pontos** por exercício entregue
+nas primeiras 4h e **1 ponto** depois. Aprovação exige 60 pontos. Isso quer
+dizer 30 problemas dentro da janela, ou 60 fora dela. Ficar fora da sexta 14–18
+não custa presença: custa o dobro de trabalho no semestre.
+
 ## 5. As regras que o planejador obedece
 
 1. **Prazo manda.** Peso de cada matéria = proximidade da próxima avaliação.

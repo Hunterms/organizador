@@ -562,6 +562,9 @@ export default function Estudos({ state, updateState, userId }) {
 
                   {(() => {
                     const att = attendanceSummary(subject, state.attendance, state.settings);
+                    if (att.tracked === false) return (
+                      <p className="text-[10px] text-zinc-600 pt-1">Sem controle de presenca nesta materia.</p>
+                    );
                     if (att.slots === 0) return null;
                     const nivel = attendanceLevel(att);
                     const danger = nivel === 'perigo' || nivel === 'estourado';

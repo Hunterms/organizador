@@ -98,3 +98,20 @@ assert.equal(attendanceLevel({ remaining: 3, weekHours: 4, slots: 2, maxMisses: 
 console.log('ok — degraus de cor da falta');
 
 // (o teste de gamificacao vive junto porque roda no mesmo comando)
+
+// --- materia que ele nao frequenta nao acumula falta ------------------------
+const naoVou = { id: 'z', code: 'EE400', attends: false,
+  class_schedule: [{ day: 1, time: '08:00', duration: 120 }, { day: 3, time: '08:00', duration: 120 }] };
+const rz = attendanceSummary(naoVou, [{ subjectId: 'z', date: '2026-08-10', status: 'absent' }],
+  { semesterStart: '2026-08-10', semesterEnd: '2026-12-05' }, '2026-08-30');
+assert.equal(rz.tracked, false, 'materia nao frequentada tem que vir marcada como nao rastreada');
+assert.equal(rz.maxMisses, 0);
+assert.equal(rz.absences, 0, 'falta antiga nao pode reaparecer na conta');
+assert.equal(rz.unmarked, 0, 'nao pode cobrar presenca de aula que ele nao vai');
+assert.equal(attendanceLevel(rz), 'ok', 'e nao pode acender alerta nenhum');
+// Com attends true a mesma materia volta a contar.
+const rv = attendanceSummary({ ...naoVou, attends: true }, [{ subjectId: 'z', date: '2026-08-10', status: 'absent' }],
+  { semesterStart: '2026-08-10', semesterEnd: '2026-12-05' }, '2026-08-30');
+assert.equal(rv.tracked, true);
+assert.ok(rv.maxMisses > 0 && rv.absences === 2);
+console.log('ok — materia sem controle de presenca');
