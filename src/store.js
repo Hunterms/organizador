@@ -1,6 +1,7 @@
 import { supabase } from './lib/supabase';
 import { getDateKey } from './lib/attendance';
-import { buildWeekPlan, tituloBloco, BLOCO_MIN } from './lib/weekPlan';
+import { buildWeekPlan, tituloBloco, BLOCO_MIN, intervaloCepeda } from './lib/weekPlan';
+export { intervaloCepeda };
 import { classDates } from './lib/attendance';
 import { caiHoje } from './lib/rotina';
 
@@ -953,7 +954,7 @@ export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) 
 // Default: 2h em dia util, 4h no fim de semana (o que o Hunter declarou).
 // Concluir um bloco de estudo carimba o topico: e o que faz a semana seguinte
 // nao sortear o mesmo assunto. Reverter a tarefa desfaz o carimbo.
-export async function markTopicStudied(topicId, minutes, feito) {
+export async function markTopicStudied(topicId, minutes, feito, nextReviewAt = undefined) {
   const { data, error } = await supabase.from('topics')
     .select('total_study_minutes').eq('id', topicId).single();
   if (error) throw error;
@@ -961,6 +962,9 @@ export async function markTopicStudied(topicId, minutes, feito) {
   const patch = feito
     ? { last_studied: getDateKey(), total_study_minutes: base + minutes }
     : { total_study_minutes: Math.max(0, base - minutes) };
+  // Sem isso a data de revisao so era semeada por quem abrisse o RetrievalModal
+  // na mao, e o plano semanal nunca agendava revisao nenhuma.
+  if (feito && nextReviewAt) patch.next_review_at = nextReviewAt;
   const { error: e2 } = await supabase.from('topics').update(patch).eq('id', topicId);
   if (e2) throw e2;
 }

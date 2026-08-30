@@ -292,6 +292,31 @@ Medido em 84 dias: 75 a 90 minutos de tarefa por dia útil, dos quais cerca de
 45 são âncoras de 5 minutos. O pico é 205 minutos, num sábado por mês, e 120
 deles são o mercado.
 
+## 4f. O que a auditoria de 30/08 encontrou
+
+Revisando o app contra as próprias fontes, três regras do canon estavam
+escritas e não implementadas. Vale registrar, porque o padrão se repete: a
+regra é fácil de escrever e some na hora de codar.
+
+**A repetição espaçada existia e o planejador ignorava.** As colunas
+`next_review_at`, o `calculateNextReview` e a fila de revisão já estavam no
+código, mas alimentados só por quem abrisse o modal de retrieval na mão. O
+plano semanal nunca agendava revisão, e concluir um bloco nunca semeava a data.
+Ou seja: distributed practice, a técnica de utilidade **alta** no Dunlosky,
+estava fora do motor. Agora concluir um bloco agenda a revisão pela regra do
+Cepeda — **15% do tempo que falta até a prova** — e revisão vencida entra no
+topo da fila, antes de conteúdo novo, com método de retrieval em vez de
+exposição.
+
+**O ritual de fechamento era decorativo.** O guia de cada bloco mandava
+"escreva numa linha qual é o próximo passo", e não havia campo para escrever.
+Leroy mediu que quem escreve o plano de retomada carrega menos resíduo de
+atenção. Agora fechar um bloco de estudo pede essa linha, e ela fica no tópico.
+
+**A implementation intention está pela metade.** Gollwitzer pede gatilho, hora
+**e lugar**. O bloco tem hora e não tem lugar. Fica registrado como dívida: é o
+único dos três que continua aberto.
+
 ## 5. As regras que o planejador obedece
 
 1. **Prazo manda.** Peso de cada matéria = proximidade da próxima avaliação.

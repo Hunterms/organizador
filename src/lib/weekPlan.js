@@ -17,6 +17,21 @@ const TIPOS = {
 };
 export const tipoDe = (subject) => TIPOS[subject.code] || 'matematica';
 
+// Quando revisar o que acabou de ser estudado (docs/METODOS.md secao 3).
+// Cepeda e colegas mediram em mais de 1350 pessoas: o intervalo otimo ate a
+// primeira revisao fica entre 10% e 20% do tempo que falta pro teste. Usamos
+// 15%, com piso de 1 dia (revisar no mesmo dia nao espaca nada) e teto de 21
+// (mais que isso e esquecer antes de revisar).
+export function intervaloCepeda(hoje, dataProva) {
+  if (!dataProva) return null;
+  const dias = Math.round((new Date(dataProva + 'T12:00:00') - new Date(hoje + 'T12:00:00')) / 86400000);
+  if (dias <= 0) return null;
+  const gap = Math.min(21, Math.max(1, Math.round(dias * 0.15)));
+  const d = new Date(hoje + 'T12:00:00');
+  d.setDate(d.getDate() + gap);
+  return getDateKey(d);
+}
+
 // Novo = fim de semana, quando ha cabeca pra conteudo inedito.
 // Recuperacao = dia util, depois de 6h de CLT e ate 4h de aula.
 const METODOS = {
@@ -132,7 +147,7 @@ function horariosDoDia(subject_list, date, n, ancora, manha) {
 // Escolhe o topico do bloco. Fim de semana puxa o que nunca foi estudado;
 // dia util puxa o que ficou marcado como dificuldade, que e onde o retrieval
 // rende mais. Topico ja usado nesta semana so volta se nao sobrar outro.
-function escolheTopico(subject, novo, usados, alvo) {
+function escolheTopico(subject, novo, usados, alvo, hoje) {
   const todos = subject.topics || [];
   if (!todos.length) return null;
   // A prova manda no assunto, nao so na urgencia. A P1 de EE400 cobre a Parte I
@@ -144,9 +159,14 @@ function escolheTopico(subject, novo, usados, alvo) {
     : [];
   const pool = naFaixa.length ? naFaixa : todos;
 
+  // Revisao vencida vem antes de conteudo novo, em qualquer dia. Practice
+  // testing e distributed practice sao as duas tecnicas de utilidade ALTA
+  // (Dunlosky); aprender assunto novo por cima de revisao atrasada troca a
+  // tecnica boa pela media.
+  const vencida = t => t.next_review_at && t.next_review_at <= hoje;
   const ordem = novo
-    ? [t => t.status === 'not_studied', t => t.status === 'difficulty', () => true]
-    : [t => t.status === 'difficulty', t => t.status === 'not_studied', () => true];
+    ? [vencida, t => t.status === 'not_studied', t => t.status === 'difficulty', () => true]
+    : [vencida, t => t.status === 'difficulty', t => t.status === 'not_studied', () => true];
   for (const filtro of ordem) {
     // Dentro do mesmo balde, o mais esquecido primeiro. Topico nunca tocado
     // (sem last_studied) vem antes de todos.
@@ -281,7 +301,7 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
       const novo = fds || naManha;
       const tipo = tipoDe(entrada.s);
       const uDia = urgencia(entrada.s, date);
-      const topico = escolheTopico(entrada.s, novo, topicosUsados, uDia.alvo);
+      const topico = escolheTopico(entrada.s, novo, topicosUsados, uDia.alvo, date);
       plano.push({
         date,
         time: hora,
@@ -289,9 +309,13 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
         code: entrada.s.code || entrada.s.name,
         topic: topico?.name || null,
         topicId: topico?.id || null,
-        kind: novo ? 'novo' : 'recuperacao',
+        // Revisao vencida troca o metodo: retrieval, nao exposicao.
+        kind: (topico?.next_review_at && topico.next_review_at <= date)
+          ? 'revisao' : (novo ? 'novo' : 'recuperacao'),
         tipo,
-        method: METODOS[tipo][novo ? 'novo' : 'recuperacao'],
+        method: (topico?.next_review_at && topico.next_review_at <= date)
+          ? 'Retrieval: feche o material e escreva de memoria o conceito e um exemplo. So depois confira, e anote so o que faltou.'
+          : METODOS[tipo][novo ? 'novo' : 'recuperacao'],
         minutes: BLOCO_MIN,
         // Alvo recalculado NA DATA DO BLOCO: estudar quinta apontando pra prova
         // de terca e mentira. Depois da avaliacao o bloco passa a mirar a proxima.
