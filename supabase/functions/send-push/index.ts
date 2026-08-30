@@ -145,7 +145,7 @@ async function sleepPrefs(admin: Admin, uid: string) {
 async function materializeRoutine(admin: Admin, userId: string, today: string) {
   const dow = weekday(today);
   const [{ data: routine }, { data: custom }, { data: existing }] = await Promise.all([
-    admin.from("home_routine").select("room_key, days, category, time, effort").eq("user_id", userId),
+    admin.from("home_routine").select("room_key, days, category, time, effort, interval_weeks, week_offset").eq("user_id", userId),
     admin.from("custom_rooms").select("key, label").eq("user_id", userId),
     admin.from("tasks").select("title").eq("user_id", userId).eq("date", today),
   ]);
@@ -154,7 +154,14 @@ async function materializeRoutine(admin: Admin, userId: string, today: string) {
     DEFAULT_ROOM_LABELS[key] || (custom ?? []).find((c: { key: string }) => c.key === key)?.label || null;
   const rows = [];
   for (const r of routine ?? []) {
+    // Espelho de lib/rotina.js caiHoje(). Se divergir, a tarefa duplica ou some.
     if (!Array.isArray(r.days) || !r.days.includes(dow)) continue;
+    const intervalo = r.interval_weeks ?? 1;
+    if (intervalo > 1) {
+      const semana = Math.floor(
+        (Date.parse(today + "T12:00:00Z") - Date.parse("2026-08-31T12:00:00Z")) / 86400000 / 7);
+      if ((((semana % intervalo) + intervalo) % intervalo) !== ((r.week_offset ?? 0) % intervalo)) continue;
+    }
     const title = labelOf(r.room_key);
     if (!title || have.has(title.toLowerCase())) continue;
     have.add(title.toLowerCase());

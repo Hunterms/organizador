@@ -19,3 +19,18 @@ assert.ok(/for \(let i = 0, d = today; i < 30/.test(src), 'ativos30 tem que varr
 assert.ok(/tasksOk \|\| \(focus\[date\] \|\| 0\) >= 1/.test(src),
   'um pomodoro de foco sozinho tem que segurar o dia');
 console.log('ok — gamificacao');
+
+// --- XP da tarefa proporcional ao esforco -----------------------------------
+const { xpDaTarefa } = await import('./gamification.js');
+assert.ok(xpDaTarefa({ effort: '30' }) > xpDaTarefa({ effort: '5' }) * 4,
+  'meia hora tem que valer bem mais que cinco minutos');
+assert.ok(xpDaTarefa({ effort: '5' }) > 0,
+  'tarefa curta ainda tem que pontuar: a sensacao de cumprir e o objetivo dela');
+assert.ok(xpDaTarefa({ effort: '120' }) > xpDaTarefa({ effort: '60' }));
+// As 8 ancoras diarias de 5min nao podem render mais que 2 pomodoros de estudo.
+const rotinaDiaria = 8 * xpDaTarefa({ effort: '5' });
+const doisPomodoros = 2 * 30;
+assert.ok(rotinaDiaria < doisPomodoros,
+  `rotina (${rotinaDiaria}) nao pode render mais que estudo (${doisPomodoros})`);
+assert.equal(xpDaTarefa({ effort: 'desconhecido' }), 10, 'esforco fora da tabela cai no padrao');
+console.log('ok — XP proporcional ao esforco');
