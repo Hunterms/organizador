@@ -188,6 +188,7 @@ export async function fetchAllData(userId) {
       semesterStart: profile?.semester_start || '',
       semesterEnd: profile?.semester_end || '',
       studyPlace: profile?.study_place || '',
+      busyWindows: profile?.busy_windows || [],
       morningDays: profile?.morning_days || [],
     },
     pomodoroSettings: profile?.pomodoro_settings || defaultState.pomodoroSettings,
@@ -574,6 +575,7 @@ export async function updateProfile(userId, updates) {
   if ('semesterEnd' in updates) dbUpdates.semester_end = updates.semesterEnd || null;
   if ('morningDays' in updates) dbUpdates.morning_days = updates.morningDays || [];
   if ('studyPlace' in updates) dbUpdates.study_place = updates.studyPlace || null;
+  if ('busyWindows' in updates) dbUpdates.busy_windows = updates.busyWindows || [];
   if ('pomodoroSettings' in updates) dbUpdates.pomodoro_settings = updates.pomodoroSettings;
   const { error } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
   if (error) throw error;
@@ -920,7 +922,15 @@ async function ensureMethodGuide(userId, cache, bloco) {
 }
 
 export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) {
-  const plano = buildWeekPlan(state.subjects, inicio, weekBudget(state.settings), {}, state.settings?.morningDays || [], state.settings?.studyPlace || '');
+  // Compromisso fixo entra como uma "materia" sem topico nem prova: o
+  // planejador desvia do horario dela (ocupacaoDoDia le class_schedule) e nunca
+  // lhe da bloco (so materia com topico ou prova entra na distribuicao).
+  // Reuso em vez de um parametro novo, que ja seria o setimo posicional.
+  const compromissos = (state.settings?.busyWindows || []).length
+    ? [{ id: '__ocupado', code: '', class_schedule: state.settings.busyWindows, topics: [], exams: [] }]
+    : [];
+  const plano = buildWeekPlan([...(state.subjects || []), ...compromissos], inicio,
+    weekBudget(state.settings), {}, state.settings?.morningDays || [], state.settings?.studyPlace || '');
   if (!plano.length) return [];
   // Dedupe por data+MATERIA, nao por titulo. Titulo carrega o topico escolhido,
   // e duas geracoes do mesmo domingo podem escolher topicos diferentes: o
