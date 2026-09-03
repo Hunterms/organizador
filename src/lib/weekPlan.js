@@ -103,7 +103,12 @@ const HORA_MANHA = 8;
 // 11h entra antes das tardes: com o terreiro comecando 16h no sabado, encher
 // ate as 15h deixava 10 minutos pra sair. Tres blocos de manha e um a tarde
 // abrem 70 minutos de folga antes do compromisso.
-const CAND_FDS = [9, 10, 11, 14, 15, 16, 17];
+// 8h entra no fim de semana por causa da rampa de carga. Com o terreiro das
+// 16h as 23h no sabado, os candidatos livres eram 9, 10, 11, 14 e 15: cinco.
+// Um orcamento de 6 blocos criava um bloco SEM HORARIO, que e bloco que nao
+// vira implementation intention nenhuma. Ele acorda as 7, entao 8h de sabado
+// existe. Medido em 03/09/2026 na previa do plano com boost.
+const CAND_FDS = [8, 9, 10, 11, 14, 15, 16, 17];
 
 function ocupacaoDoDia(subject_list, date) {
   const dow = new Date(date + 'T12:00:00').getDay();
@@ -182,9 +187,25 @@ function escolheTopico(subject, novo, usados, alvo, hoje) {
   // (Dunlosky); aprender assunto novo por cima de revisao atrasada troca a
   // tecnica boa pela media.
   const vencida = t => t.next_review_at && t.next_review_at <= hoje;
+  const nunca = t => !t.lastStudied;
+  // DIA DE CONTEUDO NOVO (fim de semana e manha liberada): topico NUNCA visto
+  // vem antes de revisao vencida. Dia de recuperacao (noite de dia util):
+  // revisao vencida vem antes.
+  //
+  // POR QUE a inversao, medido em 03/09/2026: com a prova em 13 dias o
+  // intervalo do Cepeda da 2 dias, entao revisao vence a cada 2 dias e come a
+  // capacidade. A EA513 recebia 14 blocos em 14 dias e cobria 7 dos 12 topicos
+  // da prova, re-revisando os mesmos 7 — 5 topicos chegariam na prova sem
+  // NENHUMA exposicao.
+  //
+  // A regra 5 do canon ("revisao vencida antes de conteudo novo") vem do
+  // Dunlosky, e esta certa: practice testing rende mais que exposicao. Mas ela
+  // pressupoe que a cobertura existe. Nao se revisa o que nao se aprendeu, e
+  // ponto que nunca foi visto esta perdido de qualquer forma. Entao a
+  // precedencia se divide por tipo de dia em vez de valer sempre.
   const ordem = novo
-    ? [vencida, t => t.status === 'not_studied', t => t.status === 'difficulty', () => true]
-    : [vencida, t => t.status === 'difficulty', t => t.status === 'not_studied', () => true];
+    ? [nunca, vencida, t => t.status === 'difficulty', () => true]
+    : [vencida, t => t.status === 'difficulty', nunca, () => true];
   for (const filtro of ordem) {
     // Dentro do mesmo balde, o mais esquecido primeiro. Topico nunca tocado
     // (sem lastStudied) vem antes de todos.
@@ -212,11 +233,11 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
     return getDateKey(d);
   });
 
-  // Quantos blocos cada dia comporta.
-  const blocosPorDia = dias.map(d => {
-    const dow = new Date(d + 'T12:00:00').getDay();
-    return Math.floor((budget[dow] ?? 0) / BLOCO_MIN);
-  });
+  // Quantos blocos cada dia comporta. `budget` aceita array por dia da semana
+  // OU funcao (date) -> minutos. A funcao existe pra rampa de carga com data de
+  // fim: uma semana que atravessa o fim do boost tem dias com orcamento
+  // diferente, e um array indexado por dia da semana nao sabe expressar isso.
+  const blocosPorDia = dias.map(d => Math.floor(orcamentoDe(budget, d) / BLOCO_MIN));
   const totalBlocos = blocosPorDia.reduce((a, b) => a + b, 0);
   if (!totalBlocos) return [];
 
@@ -368,13 +389,20 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
     a.date.localeCompare(b.date) || (a.time || '99').localeCompare(b.time || '99'));
 }
 
+// Minutos disponiveis num dia. Aceita array (indexado por dia da semana) ou
+// funcao (date) -> minutos.
+export function orcamentoDe(budget, date) {
+  if (typeof budget === 'function') return budget(date) ?? 0;
+  const dow = new Date(date + 'T12:00:00').getDay();
+  return budget?.[dow] ?? 0;
+}
+
 // Quantos blocos de 50min cabem num dia, dado o orcamento por dia da semana.
 // Mora aqui e nao no store porque e aritmetica de planejamento, e porque dentro
 // do store nao daria teste. O store usa isto pra nao empilhar num dia mais
 // bloco do que o dia aguenta.
 export function blocosQueCabem(budget, date) {
-  const dow = new Date(date + 'T12:00:00').getDay();
-  return Math.floor((budget?.[dow] ?? 0) / BLOCO_MIN);
+  return Math.floor(orcamentoDe(budget, date) / BLOCO_MIN);
 }
 
 // Titulo curto da tarefa que vai pro app.
