@@ -17,9 +17,12 @@ import {
 const dayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
 import {
   getTodayReviewQueue, generateInterleavedSession,
+  flagPassiveStudy,
   getSubjectInCrunch, buildCrunchPlan,
 } from '../lib/studyMethods';
 import { computeMedia } from '../lib/grades';
+import { importaClassroom } from '../lib/classroom';
+import { googleConfigurado } from '../lib/google';
 import RetrievalModal from './RetrievalModal';
 import Presenca from './Presenca';
 import { attendanceLevel, aulasRestantes } from '../lib/attendance';
@@ -114,9 +117,30 @@ export default function Estudos({ state, updateState, userId }) {
   const [crunchSubjectId, setCrunchSubjectId] = useState(null); // show plan for this subject
   const [showPresenca, setShowPresenca] = useState(false);
 
+  // Sync do Classroom. Recarrega no fim quando algo mudou: o import escreve
+  // direto no banco e nao devolve as linhas, entao inventar patch de estado
+  // aqui seria adivinhar o que o banco tem.
+  const [classroom, setClassroom] = useState({ rodando: false, res: null, erro: null });
+  const sincronizaClassroom = async () => {
+    if (!userId) return;
+    setClassroom({ rodando: true, res: null, erro: null });
+    try {
+      const res = await importaClassroom(userId, state);
+      setClassroom({ rodando: false, res, erro: null });
+      if (res.criadas || res.atualizadas) setTimeout(() => window.location.reload(), 1200);
+    } catch (e) {
+      setClassroom({ rodando: false, res: null, erro: String(e.message || e) });
+    }
+  };
+
   // Memoized study-methods artifacts
   const todayQueue = useMemo(() => getTodayReviewQueue(state.subjects), [state.subjects]);
   const crunchInfo = useMemo(() => getSubjectInCrunch(state.subjects), [state.subjects]);
+  // Achatado com a materia junto, porque o aviso precisa do codigo dela e o
+  // clique precisa abrir o retrieval no par (topico, materia).
+  const passivos = useMemo(() => (state.subjects || []).flatMap(sub =>
+    flagPassiveStudy(sub).map(topic => ({ topic, subject: sub }))
+  ), [state.subjects]);
   const crunchSubject = crunchSubjectId
     ? state.subjects.find(s => s.id === crunchSubjectId)
     : crunchInfo?.subject;
@@ -381,6 +405,53 @@ export default function Estudos({ state, updateState, userId }) {
         </button>
       )}
 
+      {/* Atividades do Classroom. Restaurado do commit c497c1c, que removeu as
+          integracoes em 16/07 porque "so tinham funcao de notificar". O objetivo
+          agora e outro: em 02/09 o Hunter nomeou a causa da nao-adesao (o dia
+          dele nao aparece no app) e atividade da faculdade e metade desse dia.
+          O fluxo do Google e de token, sem refresh token, entao roda quando ele
+          abre o app — e ok pra prazo, que tem dias de folga. Reuniao, que precisa
+          estar la ANTES de ele abrir, vai por cron no servidor (sync-agenda). */}
+      {googleConfigurado() && (
+        <div className="card space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+              <Upload size={16} className="text-amber-400" aria-hidden="true" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium text-white">Atividades do Classroom</p>
+              <p className="text-[11px] text-zinc-500 leading-snug">
+                {classroom.res
+                  ? `${classroom.res.cursos} turmas · ${classroom.res.criadas} novas · ${classroom.res.atualizadas} com prazo corrigido`
+                  : 'Puxa as entregas com prazo e corrige quando o professor move a data.'}
+              </p>
+            </div>
+            <button onClick={sincronizaClassroom} disabled={classroom.rodando}
+              className="shrink-0 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-white text-[11px] font-medium px-3 py-2 rounded-xl transition-colors min-h-[38px] flex items-center gap-1.5">
+              {classroom.rodando
+                ? <><Loader2 size={12} className="animate-spin" aria-hidden="true" /> puxando</>
+                : 'Sincronizar'}
+            </button>
+          </div>
+          {classroom.erro && (
+            <p className="text-[11px] text-red-300 leading-relaxed">{classroom.erro}</p>
+          )}
+          {/* Curso sem codigo de materia reconhecivel: reporta em vez de criar
+              materia nova, que era o que o import antigo fazia. */}
+          {classroom.res?.semCodigo?.length > 0 && (
+            <p className="text-[11px] text-amber-300/80 leading-relaxed">
+              Sem matéria correspondente: {classroom.res.semCodigo.join(', ')}.
+              Renomeie a matéria no app com o código (ex: MC426) para casar.
+            </p>
+          )}
+          {classroom.res?.erros?.length > 0 && (
+            <p className="text-[11px] text-red-300/80 leading-relaxed">
+              {classroom.res.erros.slice(0, 3).join(' · ')}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Spaced-review queue: topics whose next_review_at has arrived */}
       {todayQueue.length > 0 && (
         <div className="card !bg-indigo-500/5 !border-indigo-500/15">
@@ -422,6 +493,41 @@ export default function Estudos({ state, updateState, userId }) {
             className="w-full bg-indigo-500 hover:bg-indigo-400 text-white py-2.5 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-2">
             <Brain size={13} aria-hidden="true" /> Iniciar fila de revisao
           </button>
+        </div>
+      )}
+
+      {/* Estudo passivo: tempo gasto no topico sem UMA tentativa de retrieval.
+          A funcao existia desde a migracao de metodos e nunca foi chamada por
+          ninguem — e ela detecta justamente o modo de falha mais caro do
+          Dunlosky: hora sentada que parece estudo e nao vira nota. */}
+      {passivos.length > 0 && (
+        <div className="card border-amber-500/25 bg-amber-500/[0.06] space-y-2.5">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="text-amber-400 shrink-0" aria-hidden="true" />
+            <p className="text-[13px] font-semibold text-amber-300">
+              Tempo sem teste ({passivos.length})
+            </p>
+          </div>
+          <p className="text-[11px] text-zinc-400 leading-relaxed">
+            Estes topicos tem tempo de estudo e nenhuma tentativa de recuperacao.
+            Bloco que termina sem voce produzir uma resposta sua, sem consultar,
+            nao contou.
+          </p>
+          <div className="space-y-1.5">
+            {passivos.slice(0, 4).map(({ topic, subject }) => (
+              <button key={topic.id} onClick={() => openRetrieval(topic, subject)}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg bg-zinc-800/40 hover:bg-zinc-800 text-left transition-colors min-h-[44px]">
+                <span className="text-[11px] text-zinc-500 shrink-0">{subject.code || subject.name}</span>
+                <span className="text-[12px] text-zinc-200 flex-1 truncate">{topic.name}</span>
+                <span className="text-[10px] text-amber-400/80 tabular-nums shrink-0">
+                  {topic.totalStudyMinutes}min
+                </span>
+              </button>
+            ))}
+            {passivos.length > 4 && (
+              <p className="text-[10px] text-zinc-600 text-center pt-1">+ {passivos.length - 4} outros</p>
+            )}
+          </div>
         </div>
       )}
 
