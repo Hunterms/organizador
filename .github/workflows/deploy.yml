@@ -35,6 +35,10 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          # Sem esta, enablePush() devolve 'no-vapid-key' e nenhum dispositivo
+          # novo consegue se inscrever na build publicada. As inscricoes antigas
+          # seguiam funcionando porque vivem no servidor, o que esconde o furo.
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
           BASE_PATH: /${{ github.event.repository.name }}/
         run: npm run build
 
