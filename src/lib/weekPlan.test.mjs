@@ -362,3 +362,95 @@ console.log('ok — folga de', 16 * 60 - ultimoFim, 'min antes do compromisso');
     'materia sem prova mas com revisao vencida tem que receber bloco');
   console.log('ok — revisao vencida garante cota');
 }
+
+// --- rampa de carga: orcamento por DATA, nao so por dia da semana ------------
+// Pedido em 03/09/2026: "aumenta bastante a carga nos proximos dias pra eu ter
+// uma rotina mais de boa depois". Uma semana que atravessa o fim do boost tem
+// dias com orcamento diferente, e array indexado por dia da semana nao expressa
+// isso — dai buildWeekPlan e blocosQueCabem aceitarem funcao.
+{
+  const { orcamentoDe, blocosQueCabem: cabem } = await import('./weekPlan.js');
+  const normal = [240, 120, 120, 120, 120, 120, 240];
+  const boost  = [300, 180, 180, 180, 180, 180, 300];
+  const ATE = '2026-09-17';
+  const rampa = (date) => {
+    const dow = new Date(date + 'T12:00:00').getDay();
+    return (date <= ATE ? boost : normal)[dow];
+  };
+
+  // array continua funcionando
+  assert.equal(orcamentoDe(normal, '2026-09-07'), 120, 'segunda no array');
+  assert.equal(orcamentoDe(normal, '2026-09-12'), 240, 'sabado no array');
+  assert.equal(orcamentoDe(undefined, '2026-09-07'), 0, 'sem orcamento nao explode');
+
+  // funcao decide pela data
+  assert.equal(orcamentoDe(rampa, '2026-09-07'), 180, 'segunda dentro do boost');
+  assert.equal(orcamentoDe(rampa, '2026-09-21'), 120, 'segunda depois do boost');
+  assert.equal(orcamentoDe(rampa, ATE), 180, 'o ultimo dia do boost ainda e boost');
+  assert.equal(orcamentoDe(rampa, '2026-09-18'), 120, 'o dia seguinte ja e normal');
+
+  assert.equal(cabem(rampa, '2026-09-07'), 3, '180/50 = 3 blocos');
+  assert.equal(cabem(rampa, '2026-09-21'), 2, '120/50 = 2 blocos');
+
+  // e o plano usa isso: a semana do boost tem que ter mais bloco que a normal
+  const semanaBoost = buildWeekPlan(S, '2026-09-06', rampa);
+  const semanaNormal = buildWeekPlan(S, '2026-09-20', rampa);
+  assert.ok(semanaBoost.length > semanaNormal.length,
+    `boost ${semanaBoost.length} tem que ser > normal ${semanaNormal.length}`);
+  console.log('ok — rampa de carga:', semanaBoost.length, 'blocos no boost contra', semanaNormal.length, 'depois');
+}
+
+// --- nenhum bloco sem horario, inclusive com a rampa ------------------------
+// O teste antigo ("relogio segue o conteudo") usava o orcamento normal, que
+// cabe folgado. Com boost de 6 blocos no sabado e o terreiro das 16h as 23h,
+// sobravam 5 candidatos e um bloco nascia SEM hora — e bloco sem hora nao vira
+// implementation intention (Gollwitzer pede gatilho, hora E lugar).
+{
+  const BOOST = [300, 180, 180, 180, 180, 180, 300];
+  const comTerreiroSab = { id: '__ocupado', code: '', topics: [], exams: [],
+    class_schedule: [{ day: 6, time: '16:00', duration: 420 }] };
+  const p = buildWeekPlan([...S, comTerreiroSab], '2026-09-06', BOOST, {}, [1, 2, 3, 4, 5], 'escritorio');
+  const semHora = p.filter(b => !b.time);
+  assert.equal(semHora.length, 0,
+    `${semHora.length} bloco(s) sem horario: ${semHora.map(b => b.date + ' ' + b.code).join(', ')}`);
+  // e nenhum pode cair dentro do terreiro
+  for (const b of p.filter(b => new Date(b.date + 'T12:00:00').getDay() === 6)) {
+    const h = Number(b.time.slice(0, 2));
+    assert.ok(h < 16, `bloco de sabado as ${b.time} invade o terreiro`);
+  }
+  console.log('ok — com boost, todos os', p.length, 'blocos tem hora e o sabado respeita o terreiro');
+}
+
+// --- precedencia se divide por tipo de dia ----------------------------------
+// Medido em 03/09/2026: com a prova em 13 dias o intervalo do Cepeda da 2 dias,
+// entao revisao vencia a cada 2 dias e comia a capacidade. A EA513 recebia 14
+// blocos e cobria 7 dos 12 topicos da prova, re-revisando os mesmos 7 — cinco
+// chegariam na prova sem nenhuma exposicao. Nao se revisa o que nao se aprendeu.
+{
+  const t = (id, pos, extra = {}) => ({ id, name: id, position: pos, status: 'not_studied', ...extra });
+  const materia = (topics) => [{
+    id: 'x', code: 'EA513', class_schedule: [], topics,
+    exams: [{ name: 'P1', date: '2026-09-17', status: 'pendente', covers_from: 1, covers_to: 12 }],
+  }];
+
+  // t1 ja estudado e com revisao VENCIDA; t2 nunca visto.
+  const topics = [
+    t('visto', 1, { lastStudied: '2026-09-04', next_review_at: '2026-09-05' }),
+    t('nunca', 2),
+  ];
+
+  // Dia de conteudo novo (sabado 05/09): o nunca visto tem que vir primeiro.
+  const fds = buildWeekPlan(materia(topics), '2026-09-05', [120, 0, 0, 0, 0, 0, 0]);
+  assert.equal(fds[0].topicId, 'nunca', 'no fim de semana, cobertura vem antes de revisao');
+
+  // Dia de recuperacao (segunda 07/09): a revisao vencida tem que vir primeiro.
+  const util = buildWeekPlan(materia(topics), '2026-09-06', [0, 120, 0, 0, 0, 0, 0]);
+  assert.equal(util[0].topicId, 'visto', 'em dia util, revisao vencida vem antes');
+  assert.equal(util[0].kind, 'revisao', 'e ela troca o metodo pra retrieval');
+
+  // Sem nada nunca visto, o fim de semana volta a puxar a revisao vencida.
+  const soVisto = [t('visto', 1, { lastStudied: '2026-09-04', next_review_at: '2026-09-05' })];
+  const fds2 = buildWeekPlan(materia(soVisto), '2026-09-05', [120, 0, 0, 0, 0, 0, 0]);
+  assert.equal(fds2[0].topicId, 'visto', 'coberto tudo, a revisao volta a mandar');
+  console.log('ok — cobertura manda na manha e no fds, retrieval manda no dia util');
+}

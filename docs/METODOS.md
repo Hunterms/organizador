@@ -526,6 +526,65 @@ meta, e é assim que a seção 4b o cita. A própria revisão avisa que a maiori
 94 estudos é sobre alcançar objetivo em geral, não sobre procrastinação. Não
 vale trazer esse número para esta seção.
 
+## 4i. Rampa de carga, e a precedencia que se divide por tipo de dia
+
+Entrou em 03/09/2026, quando o Hunter pediu carga alta agora pra ter rotina
+calma depois. O calendario justificava: EE400 P1 em 6 dias cobrindo 6 topicos,
+EA513 P1 e MC426 A2 em 14 dias cobrindo 12 e 6, e **nada estudado**. Sao 24
+primeiras exposicoes em 14 dias, e depois de 17/09 abre um vao de duas semanas.
+
+### O gargalo nao era hora, era a regra 5
+
+Conteudo novo so no fim de semana limita a ~8 primeiras exposicoes por semana.
+Restavam dois fins de semana ate 17/09: 16 exposicoes para 24 necessarias. E a
+prova de EE400 cai numa quarta, entao ela tinha **um** fim de semana.
+
+A manha liberada resolve: com os 5 dias uteis ligados, cada dia ganha um bloco
+de conteudo novo as 8h, e passa de 8 para 13 por semana.
+
+### A rampa tem data de fim, e isso nao e detalhe
+
+Carga alta sem fim declarado nao e rampa, e so um orcamento maior que ele nao
+vai cumprir. `study_boost_until` e obrigatoria pro boost existir. Configurado:
+3h em dia util e 5h no fim de semana ate 17/09, voltando a 2h e 4h depois.
+
+E o orcamento medido (secao 4h) segue rodando por cima: se ele nao fechar essa
+carga, a mediana do que ele de fato fecha puxa o numero para baixo sozinha. A
+rampa e uma aposta que o proprio app corrige.
+
+### Nao se revisa o que nao se aprendeu
+
+Este e o achado que mudou uma regra. Com a prova em 13 dias, o intervalo do
+Cepeda da 2 dias — entao revisao vence a cada 2 dias e **come a capacidade**.
+Medido na previa: EA513 recebia 14 blocos em 14 dias e cobria **7 dos 12**
+topicos da prova, re-revisando os mesmos 7. Cinco topicos chegariam na prova
+sem nenhuma exposicao.
+
+A regra que dizia "revisao vencida entra no topo da fila, antes de conteudo
+novo" vem do Dunlosky e continua certa: practice testing rende mais que
+exposicao. Mas ela pressupoe que a cobertura existe. Ponto que nunca foi visto
+esta perdido de qualquer forma, e o valor esperado de revisar pela terceira vez
+e menor que o de ver pela primeira.
+
+Entao a precedencia passou a se dividir por tipo de dia:
+
+| Dia | Primeiro na fila |
+|---|---|
+| Fim de semana e manha liberada | topico **nunca visto** |
+| Noite de dia util | **revisao vencida** |
+
+Cobertura de manha, retrieval a noite. Com a divisao, a mesma previa passou de
+7 para **12 de 12** topicos da EA513 cobertos antes da prova, e 6 de 6 nas
+outras duas.
+
+### Um bloco sem horario nao e um bloco
+
+A previa com boost criou um bloco sem hora no sabado: com o terreiro das 16h as
+23h sobravam cinco candidatos (9, 10, 11, 14, 15) e o orcamento pedia seis.
+Bloco sem hora nao vira implementation intention nenhuma — Gollwitzer pede
+gatilho, hora **e** lugar. As 8h entraram na lista de candidatos do fim de
+semana, que e hora que existe pra quem acorda as 7.
+
 ## 5. As regras que o planejador obedece
 
 1. **Prazo manda.** Peso de cada matéria = proximidade da próxima avaliação.

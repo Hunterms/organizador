@@ -201,6 +201,12 @@ export async function fetchAllData(userId) {
       studyPlace: profile?.study_place || '',
       busyWindows: profile?.busy_windows || [],
       morningDays: profile?.morning_days || [],
+      studyWeekdayMin: profile?.study_weekday_min ?? 120,
+      studyWeekendMin: profile?.study_weekend_min ?? 240,
+      // Rampa de carga: pesado ate uma data, normal depois.
+      studyBoostWeekdayMin: profile?.study_boost_weekday_min ?? null,
+      studyBoostWeekendMin: profile?.study_boost_weekend_min ?? null,
+      studyBoostUntil: profile?.study_boost_until || null,
     },
     pomodoroSettings: profile?.pomodoro_settings || defaultState.pomodoroSettings,
   };
@@ -1094,10 +1100,26 @@ export async function markTopicStudied(topicId, minutes, feito, nextReviewAt = u
   if (e2) throw e2;
 }
 
+// Orcamento de estudo. Devolve FUNCAO quando ha rampa de carga configurada,
+// porque uma semana que atravessa o fim do boost tem dias com orcamento
+// diferente — coisa que um array indexado por dia da semana nao expressa.
+// buildWeekPlan e blocosQueCabem aceitam os dois formatos.
 export function weekBudget(settings = {}) {
-  const util = (settings.studyWeekdayMin ?? 120);
-  const fds = (settings.studyWeekendMin ?? 240);
-  return [fds, util, util, util, util, util, fds];
+  const util = settings.studyWeekdayMin ?? 120;
+  const fds = settings.studyWeekendMin ?? 240;
+  const normal = [fds, util, util, util, util, util, fds];
+
+  const ate = settings.studyBoostUntil;
+  const bUtil = settings.studyBoostWeekdayMin;
+  const bFds = settings.studyBoostWeekendMin;
+  if (!ate || (!bUtil && !bFds)) return normal;
+
+  const boost = [bFds ?? fds, bUtil ?? util, bUtil ?? util, bUtil ?? util,
+                 bUtil ?? util, bUtil ?? util, bFds ?? fds];
+  return (date) => {
+    const dow = new Date(date + 'T12:00:00').getDay();
+    return (date <= ate ? boost : normal)[dow];
+  };
 }
 
 export { buildWeekPlan };
