@@ -52,10 +52,13 @@ for (const s of S) {
   assert.ok(conta(s.code) >= 1, `${s.code} ficou sem nenhum bloco na semana`);
 }
 
-// --- regra 4: uma materia por dia, EXCETO com avaliacao a menos de 2 dias ----
+// --- regra 4: uma materia por dia, EXCETO com avaliacao a 2 dias ou menos ----
+// A janela era 1 dia e virou 2 em 03/09/2026: a vespera-da-vespera virava dia
+// espalhado entre 7 materias, e e exatamente o dia que deveria ser fundo numa
+// so — ainda mais quando cai num feriado, o unico dia inteiro livre da semana.
 const crunchDoDia = (dia) => S.filter(sub => (sub.exams || []).some(e => {
   const d = Math.round((new Date(e.date + 'T12:00:00') - new Date(dia + 'T12:00:00')) / 86400000);
-  return d >= 0 && d <= 1;
+  return d >= 0 && d <= 2;
 })).map(sub => sub.code);
 for (const dia of Object.keys(porDia)) {
   const codes = plano.filter(b => b.date === dia).map(b => b.code);
@@ -63,10 +66,18 @@ for (const dia of Object.keys(porDia)) {
   assert.equal(new Set(semCrunch).size, semCrunch.length,
     `${dia} repetiu materia sem prazo colado: ${codes}`);
 }
-// E o inverso tem que valer: no dia anterior a A1, MC426 toma o dia inteiro.
-const vespera = plano.filter(b => b.date === '2026-08-31').map(b => b.code);
-assert.ok(vespera.every(c => c === 'MC426'),
-  `vespera da A1 devia ser toda de MC426, veio ${vespera}`);
+// E o inverso tem que valer: nos DOIS dias antes da A1, MC426 domina. Antes a
+// janela era de 1 dia e a assercao era "a vespera e toda de MC426"; com 2 dias
+// a materia gasta cota ja na antevespera, entao ela concentra nos dois em vez
+// de tomar so o ultimo. Concentrar antes e o objetivo da mudanca, nao efeito
+// colateral: e o que faz um feriado dois dias antes da prova virar dia fundo.
+const doisDias = plano.filter(b => b.date === '2026-08-30' || b.date === '2026-08-31');
+const deMC426 = doisDias.filter(b => b.code === 'MC426').length;
+assert.ok(deMC426 / doisDias.length >= 0.6,
+  `MC426 devia dominar os 2 dias antes da A1, ficou com ${deMC426} de ${doisDias.length}`);
+const antevespera = plano.filter(b => b.date === '2026-08-30').map(b => b.code);
+assert.ok(antevespera.every(c => c === 'MC426'),
+  `a antevespera devia ser toda de MC426, veio ${antevespera}`);
 
 // --- regra 5: conteudo novo so no fim de semana ------------------------------
 for (const b of plano) {
@@ -182,14 +193,30 @@ assert.ok(pp.filter(b => b.code === 'MC426').length <= 2,
 console.log('ok — cota limitada pelos topicos, nenhum bloco vago');
 
 // --- a ordem do relogio tem que seguir a ordem do conteudo ------------------
-// Na vespera da A1, MC426 toma o dia inteiro. Os topicos vem em ordem (U0, U1,
-// ...), entao os horarios tem que subir junto: estudar U4 antes de U0 e erro.
-const vesp = plano.filter(b => b.date === '2026-08-31');
-const idxTopico = vesp.map(b => S.find(s => s.code === b.code).topics.findIndex(t => t.name === b.topic));
-for (let i = 1; i < vesp.length; i++) {
-  assert.ok(vesp[i].time > vesp[i - 1].time, 'horarios do dia tem que subir');
-  assert.ok(idxTopico[i] > idxTopico[i - 1],
-    `conteudo fora de ordem: ${vesp[i-1].topic} as ${vesp[i-1].time} antes de ${vesp[i].topic} as ${vesp[i].time}`);
+// Quando uma materia pega varios blocos no mesmo dia, os topicos dela tem que
+// subir junto com o relogio: estudar U4 as 18h e U0 as 19h e estudar de tras
+// pra frente.
+//
+// A comparacao e DENTRO de cada materia. A versao antiga comparava indice entre
+// materias diferentes, o que so nao quebrava porque o dia testado era de uma
+// materia so — e deixou de ser quando a janela de crunch foi de 1 pra 2 dias.
+// Indice de MC426 contra indice de EE400 nao quer dizer nada.
+for (const dia of Object.keys(porDia)) {
+  const doDia = plano.filter(b => b.date === dia);
+  for (let i = 1; i < doDia.length; i++) {
+    assert.ok(doDia[i].time > doDia[i - 1].time,
+      `${dia}: horarios do dia tem que subir, veio ${doDia[i-1].time} e ${doDia[i].time}`);
+  }
+  for (const code of new Set(doDia.map(b => b.code))) {
+    const daMateria = doDia.filter(b => b.code === code);
+    if (daMateria.length < 2) continue;
+    const topics = S.find(s => s.code === code).topics;
+    const idx = daMateria.map(b => topics.findIndex(t => t.name === b.topic));
+    for (let i = 1; i < idx.length; i++) {
+      assert.ok(idx[i] > idx[i - 1],
+        `${dia} ${code} fora de ordem: ${daMateria[i-1].topic} as ${daMateria[i-1].time} antes de ${daMateria[i].topic} as ${daMateria[i].time}`);
+    }
+  }
 }
 // E todo bloco tem que ter horario: bloco sem hora nao e implementation intention.
 for (const b of plano) assert.ok(b.time, `${b.date} ${b.code} saiu sem horario`);
@@ -453,4 +480,45 @@ console.log('ok — folga de', 16 * 60 - ultimoFim, 'min antes do compromisso');
   const fds2 = buildWeekPlan(materia(soVisto), '2026-09-05', [120, 0, 0, 0, 0, 0, 0]);
   assert.equal(fds2[0].topicId, 'visto', 'coberto tudo, a revisao volta a mandar');
   console.log('ok — cobertura manda na manha e no fds, retrieval manda no dia util');
+}
+
+// --- feriado: skip_dates libera a hora da aula ------------------------------
+// O dado ja existia (MC404 e MC919 tem 2026-09-07 em skip_dates desde o seed) e
+// ocupacaoDoDia nunca leu. Num feriado o planejador continuava achando que a
+// aula das 14h e das 21h ocupavam, e perdia o unico dia inteiro livre.
+{
+  const comAula = [{
+    id: 'f', code: 'MC404',
+    class_schedule: [{ day: 1, time: '21:00', duration: 120 }],
+    skip_dates: ['2026-09-07'],
+    topics: Array.from({ length: 8 }, (_, i) => ({ id: 'f' + i, name: 'f' + i, position: i + 1, status: 'not_studied' })),
+    exams: [{ name: 'P1', date: '2026-10-19', status: 'pendente' }],
+  }];
+  // Segunda 07/09 (feriado) com orcamento de 8 blocos: 21h tem que estar livre.
+  const feriado = buildWeekPlan(comAula, '2026-09-07', () => 400);
+  const seg = feriado.filter(b => b.date === '2026-09-07').map(b => b.time);
+  assert.ok(seg.includes('21:00'), `21h devia estar livre no feriado, saiu ${seg.join(',')}`);
+
+  // Segunda 14/09 (dia normal) com a mesma aula: 21h tem que estar ocupada.
+  const normal = buildWeekPlan(comAula, '2026-09-14', () => 400);
+  const seg2 = normal.filter(b => b.date === '2026-09-14').map(b => b.time);
+  assert.ok(!seg2.includes('21:00'), `21h devia estar ocupada em dia de aula, saiu ${seg2.join(',')}`);
+  console.log('ok — feriado libera a hora da aula, dia normal nao');
+}
+
+// --- orcamento cravado por data vence a rampa -------------------------------
+{
+  const NORMAL = [240, 120, 120, 120, 120, 120, 240];
+  const BOOST = [300, 180, 180, 180, 180, 180, 300];
+  const porDia = { '2026-09-07': 480 };
+  const orc = (date) => {
+    if (porDia[date] != null) return porDia[date];
+    const dow = new Date(date + 'T12:00:00').getDay();
+    return (date <= '2026-09-17' ? BOOST : NORMAL)[dow];
+  };
+  const { blocosQueCabem: cabem } = await import('./weekPlan.js');
+  assert.equal(cabem(orc, '2026-09-07'), 9, 'feriado: 480/50 = 9 blocos');
+  assert.equal(cabem(orc, '2026-09-14'), 3, 'segunda comum no boost: 180/50 = 3');
+  assert.equal(cabem(orc, '2026-09-21'), 2, 'segunda depois do boost: 120/50 = 2');
+  console.log('ok — data cravada vence rampa, e rampa vence o normal');
 }

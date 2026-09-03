@@ -207,6 +207,7 @@ export async function fetchAllData(userId) {
       studyBoostWeekdayMin: profile?.study_boost_weekday_min ?? null,
       studyBoostWeekendMin: profile?.study_boost_weekend_min ?? null,
       studyBoostUntil: profile?.study_boost_until || null,
+      studyDayOverrides: profile?.study_day_overrides || {},
     },
     pomodoroSettings: profile?.pomodoro_settings || defaultState.pomodoroSettings,
   };
@@ -1112,13 +1113,19 @@ export function weekBudget(settings = {}) {
   const ate = settings.studyBoostUntil;
   const bUtil = settings.studyBoostWeekdayMin;
   const bFds = settings.studyBoostWeekendMin;
-  if (!ate || (!bUtil && !bFds)) return normal;
+  // Minutos cravados por data (feriado, dia de folga). Vencem tudo: sao o unico
+  // jeito de dizer que 07/09 nao e "uma segunda qualquer".
+  const porDia = settings.studyDayOverrides || {};
+  const temOverride = Object.keys(porDia).length > 0;
+  if (!temOverride && (!ate || (!bUtil && !bFds))) return normal;
 
   const boost = [bFds ?? fds, bUtil ?? util, bUtil ?? util, bUtil ?? util,
                  bUtil ?? util, bUtil ?? util, bFds ?? fds];
+  const temBoost = ate && (bUtil || bFds);
   return (date) => {
+    if (porDia[date] != null) return Number(porDia[date]);
     const dow = new Date(date + 'T12:00:00').getDay();
-    return (date <= ate ? boost : normal)[dow];
+    return (temBoost && date <= ate ? boost : normal)[dow];
   };
 }
 

@@ -116,6 +116,11 @@ function ocupacaoDoDia(subject_list, date) {
   for (const s of subject_list) {
     // Aula que ele nao vai nao ocupa a agenda: aquele horario vira estudo.
     if (s.attends === false) continue;
+    // Feriado e dia sem aula tambem nao ocupam. O dado ja existia em
+    // skip_dates (MC404 e MC919 tem 2026-09-07 desde o seed) e esta funcao
+    // nunca leu: num feriado o planejador continuava achando que a aula das
+    // 14h e das 21h estavam ocupadas, e perdia justamente o dia livre.
+    if ((s.skip_dates || []).includes(date)) continue;
     for (const sl of s.class_schedule || []) {
       if (sl.day !== dow || !sl.time) continue;
       const ini = Number(sl.time.slice(0, 2)) * 60 + Number(sl.time.slice(3, 5));
@@ -288,6 +293,12 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
     // Teto de 7: regra 4 impede dois blocos da mesma materia no mesmo dia.
     // Teto de topicos: mais blocos que topicos produz bloco sem assunto, que e
     // o "estudar EE400" vago que Locke e Latham derrubam.
+    //
+    // TENTEI SUBIR ESTE TETO em 03/09/2026, pra materia em crunch nao gastar a
+    // cota antes da vespera. Piorou: com o teto em 12, a EE400 despejou 8
+    // blocos no feriado e escolheTopico caiu no fallback de "faixa esgotada",
+    // repetindo O MESMO topico 5 vezes. Sete blocos com 6 topicos distintos
+    // valem mais que doze com repeticao. Revertido.
     const teto = Math.min(7, (i.s.topics || []).length || 7);
     if (i.cota > teto) { sobrou += i.cota - teto; i.cota = teto; }
   }
@@ -309,10 +320,14 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
       // Regra 4 (uma materia por dia) cede quando a avaliacao e hoje ou amanha:
       // com prazo colado, cobrir o conteudo vence distribuir o esforco. A
       // urgencia e medida na data DO DIA, senao o crunch vazaria pra semana toda.
+      // Prova a 2 dias ou menos abre a regra 4 (uma materia por dia). Era 1 dia.
+      // Com 1, a vespera-da-vespera virava dia espalhado entre 7 materias, e e
+      // exatamente o dia que deveria ser fundo numa so — ainda mais quando cai
+      // num feriado, que e o unico dia inteiro livre da semana.
       const crunch = bolsa.filter(x => {
         if (x.cota <= 0) return false;
         const u = urgencia(x.s, dias[d]);
-        return u.dias !== null && u.dias <= 1;
+        return u.dias !== null && u.dias <= 2;
       });
       const livres = bolsa.filter(x => x.cota > 0 && !noDia.has(x.s.id));
       // Ordem de precedencia no dia: avaliacao colada > revisao vencida NAQUELE
