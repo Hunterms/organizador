@@ -324,6 +324,208 @@ O lugar é um só de propósito. O valor dele não está em ser o lugar certo, e
 em ser **sempre o mesmo**: Wood e Neal descrevem hábito como associação entre
 contexto e resposta, e contexto que muda não associa nada.
 
+## 4g. O que a auditoria de 02/09 encontrou
+
+A de 30/08 foi feita lendo o código contra as fontes. Esta foi feita
+**simulando 12 semanas** com os dados reais do 2026s2: 7 matérias, 77 tópicos,
+as datas de avaliação do seed. Simular achou o que ler não acha.
+
+### O dia recebia 3,5 vezes o que cabe
+
+`ensureWeekPlanTasks` roda a cada abertura do app e replaneja 7 dias a partir de
+hoje. A dedupe era por data + matéria, o que impede a mesma matéria duas vezes
+no dia e **não impede sete matérias diferentes no mesmo dia**. Cada abertura
+punha uma matéria nova numa data futura, com chave diferente, e o dia empilhava.
+
+Medido: **515 blocos criados contra um orçamento de 216**, 78 de 84 dias
+estourados, terças de 2 blocos chegando a 7. Um dia que mente sobre o próprio
+tamanho derruba os 80% do streak e envenena todo o dado que o app usa depois.
+Agora existe teto por dia, derivado do mesmo orçamento que o planejador usa.
+
+### A cobertura não se movia
+
+`restantes` era `status !== 'mastered'`, e concluir um bloco grava `lastStudied`
+e `next_review_at` sem tocar `status`. Resultado medido: MS211 com **7 de 7
+tópicos estudados** e o planejador ainda vendo 7 restantes. O peso da matéria,
+que é a regra 1, saía de um número que nunca caía.
+
+Agora pendente é o que ainda pede trabalho antes da prova: tópico estudado com
+revisão no futuro sai da conta, e **volta a entrar quando a revisão vence**.
+
+### A ordem por esquecimento nunca funcionou
+
+`escolheTopico` ordenava por `t.last_studied`. O estado do app usa
+`lastStudied`, porque é isso que `fetchAllData` produz. O campo lido era sempre
+`undefined`, então "o mais esquecido primeiro" caía na ordem do array.
+
+O teste que cobria isso passava, porque a fixture foi escrita com a grafia do
+código em vez da grafia do dado real. Teste escrito contra o código, e não
+contra o dado, dá verde em caminho morto. Padronizado em `lastStudied`, e a
+fixture agora usa a forma que o app produz.
+
+### Auto-avaliação alta desligava a matéria
+
+Nota 4 no retrieval carimbava `mastered`, e `mastered` tirava o tópico da conta
+da prova para sempre. Um "quase tudo, falhei um detalhe" numa noite boa reduzia
+os blocos daquela matéria pelo resto do semestre.
+
+A literatura de calibração diz que esse é o pior sinal possível para essa
+decisão: quem se superestima **encerra o estudo cedo e a retenção cai**, e a má
+calibração é mais forte justamente em quem ainda sabe menos (Koriat 1997;
+Dunlosky, Rawson, Kruger e Dunning). Agora nota alta só **espaça** a revisão,
+que é reversível. `mastered` passa a exigir acerto verificado, não sensação.
+
+### O orçamento passou a ser medido, não declarado
+
+Buehler, Griffin e Ross: a falácia do planejamento erra para baixo e continua
+errando **mesmo quando a pessoa sabe** que tarefa parecida demorou mais. O
+antídoto com evidência é reference class forecasting: prever pela distribuição
+do que já aconteceu.
+
+O canon já tinha tropeçado nisso à mão, quando "descer o lixo reciclável"
+estava marcado como 30 minutos e só apareceu simulando 12 semanas. Agora
+`src/lib/orcamento.js` faz isso sozinho: mediana do que foi **efetivamente
+fechado** por dia da semana nas últimas 4 semanas, com teto no declarado e piso
+de 1 bloco. Menos de 2 observações no dia da semana, respeita o declarado.
+
+Teto no declarado porque render 4h numa segunda não autoriza o app a marcar 4h:
+a CLT e a aula existem, e isso ele sabe e o app não. Piso de 1 bloco porque
+orçamento zero apaga o dia do plano, e um app que para de planejar depois de uma
+semana ruim é pior que um app otimista.
+
+### A revisão do Cepeda não cabe no orçamento, e isso não é bug
+
+Medido: das 203 revisões que 12 semanas agendam, **21% caem no dia previsto** e
+28% não chegam no período. Antes de culpar a fila, vale a conta: são 216 blocos
+em 12 semanas, 77 tópicos precisando de primeira exposição, e 203 revisões
+pedidas. Mesmo com escalonamento perfeito o teto é 139 de 203, ou 68%. O medido
+serve 71% em algum momento.
+
+Ou seja, o planejador já opera no limite da capacidade. O intervalo de 15% gera
+mais demanda de revisão do que 18h por semana absorvem com 7 matérias e 77
+tópicos. Isso não se conserta com prioridade: se conserta com mais hora, menos
+tópico em jogo, ou aceitando que revisão é melhor esforço. É decisão de
+orçamento, não de código.
+
+O que foi consertado no meio disso: revisão vencida agora garante **cota**, não
+só lugar na fila. Antes ela era escolhida na frente dentro dos blocos que a
+matéria recebeu, e matéria com cota zero na semana não revisava nunca.
+
+### O aviso de estudo passivo estava escrito e desligado
+
+`flagPassiveStudy` existia desde a migração de métodos, com zero chamadas. Ela
+detecta o modo de falha mais caro do Dunlosky: tempo sentado no tópico sem uma
+única tentativa de recuperação, que é hora que parece estudo e não vira nota.
+Agora aparece na tela de Estudos, e o toque abre o retrieval naquele tópico.
+
+## 4h. Procrastinação, e o retorno do esforço
+
+Estas duas entraram em 02/09/2026. Foram as únicas lacunas reais de cinco
+frentes revisadas: método de estudo, procrastinação, foco, disciplina e retorno.
+Método, foco e disciplina já estavam cobertos, e não vale reescrever o que a
+seção 2, a 4 e a 4b já dizem.
+
+### O app é um planejador, e procrastinação não é problema de planejamento
+
+Esta é a descoberta desconfortável. Steel (2007), meta-análise de **691
+correlações em 216 amostras**, põe quatro coisas como preditores de
+procrastinação: **aversão à tarefa, atraso da recompensa, autoeficácia e
+impulsividade**. Nenhuma das quatro é agenda.
+
+Sirois e Pychyl vão além: procrastinar é **reparo de humor de curto prazo**,
+regulação de emoção e não de tempo. Não se adia por não saber quando estudar.
+Adia-se porque abrir a lista dói agora, e a conta é do eu de dezembro.
+
+O organizador gastou toda a inteligência dele em escalonamento, que é
+exatamente a única coisa que esse mecanismo não usa. Isso não invalida o
+planejador: um plano ruim atrapalha. Só quer dizer que melhorar o plano tem
+teto, e o teto já foi atingido.
+
+### O valor esperado do bloco, não o valor do bloco
+
+A regra 3 diz bloco de 50 minutos, nunca menos, "porque o custo de entrar no
+assunto come a sessão". O argumento é bom e está incompleto: ele otimiza o
+**valor** da sessão e nunca mediu a **probabilidade** de ela começar.
+
+Valor esperado = P(começar) × valor. Um bloco de 50 que começa 40% das vezes
+perde de um de 15 que começa 90%.
+
+Por isso `src/lib/aderencia.js` mede, e o veredito foi escrito **antes** de ver
+o número, para não virar interpretação conveniente depois:
+
+| Fechados em 4 semanas | Veredito |
+|---|---|
+| 75% ou mais | A regra 3 está certa. Não mexer. |
+| Entre 50% e 75% | Não decide. |
+| Menos de 50% | A aversão está ganhando. O bloco precisa de porta menor. |
+
+Mínimo de 10 blocos na janela; abaixo disso não opina.
+
+E a medida separa dois modos de falha que somados esconderiam a resposta:
+
+- **Nem abriu** (zero pomodoro): aversão ou impulsividade.
+- **Abriu e parou** (pomodoro parcial): bloco grande demais, cansaço, interrupção.
+
+A intervenção dos dois é oposta, então o número precisa dizer qual domina.
+
+### A porta de entrada já existia, invisível
+
+`keptDay` sempre segurou o dia com **um** pomodoro, e o botão de foco sempre
+esteve no cartão da tarefa. O que faltava era isso aparecer no momento em que se
+decide não começar. Agora o bloco de estudo ainda não aberto mostra uma linha
+dizendo que um pomodoro só já segura o dia. É texto, não motor: a mudança mais
+barata desta auditoria e a que ataca o preditor mais forte do Steel.
+
+### O quanto isso paga, sem inflar
+
+Meta-análise de tratamentos psicológicos para procrastinação: **g = 0,34**
+[0,11–0,56], 12 estudos, 718 pessoas, e **92% dos estudos com alto risco de
+viés**. O subgrupo de TCC dá g = 0,55, com 3 estudos e depois de excluir um
+outlier. É modesto e a base é fraca. Fica registrado assim para ninguém
+prometer conserto.
+
+### O laço até a nota estava aberto
+
+`grades.js` calculava a média da fórmula e nada ligava hora estudada à nota que
+saiu. O app media esforço, media resultado, e nunca punha os dois na mesma tela.
+
+Isso importa porque hábito de estudo prediz nota: Credé e Kuncel acham que
+hábitos e habilidades de estudo **rivalizam com prova padronizada e nota
+anterior** como preditores. Duckworth e Seligman acham autodisciplina explicando
+**mais de duas vezes** a variância do QI em nota final, controlando nota
+anterior e teste de aptidão. Um dos desfechos previstos por autodisciplina no
+estudo deles foi literalmente a hora do dia em que o aluno começa a lição, que é
+o que a hora âncora da seção 4b faz.
+
+`src/lib/retorno.js` põe hora fechada e nota lançada lado a lado, por matéria.
+Hora conta só bloco efetivamente fechado; nota usa a fórmula de aprovação da
+matéria quando ela existe, porque é ela que aprova, não a média aritmética.
+
+**O que isso não é:** correlação nem causalidade. São ~17 notas no semestre, com
+7 matérias de professor e dificuldade diferentes. Não há coeficiente nenhum ali
+de propósito. Serve para uma coisa que n=1 aguenta: flagrar descasamento grosso,
+matéria que come hora acima da mediana e devolve média abaixo de 5. E o oposto,
+matéria que rende sem comer hora, que é onde não se deve mexer.
+
+### Dois achados bonitos que morreram na conferência
+
+Vale registrar, porque os dois passariam se ninguém checasse.
+
+**Prazos autoimpostos (Ariely e Wertenbroch, 2002).** Era o achado mais
+acionável de todos, prazo intermediário espaçado melhorando nota, e cabia num
+app como este sem esforço. O próprio Ariely publicou nota dizendo que os dados
+do artigo têm **anomalias sérias**. Descartado.
+
+**Presença do celular (Ward e colegas, 2017).** Descartado na auditoria
+anterior: a replicação direta de 2022 falhou e a meta-análise de 22 estudos dá
+**g = −0,14**, com atenção não significativa e efeito não significativo em
+amostras europeias e norte-americanas.
+
+**E um número que não se estica.** O d = 0,65 do Gollwitzer vale para atingir
+meta, e é assim que a seção 4b o cita. A própria revisão avisa que a maioria dos
+94 estudos é sobre alcançar objetivo em geral, não sobre procrastinação. Não
+vale trazer esse número para esta seção.
+
 ## 5. As regras que o planejador obedece
 
 1. **Prazo manda.** Peso de cada matéria = proximidade da próxima avaliação.
@@ -369,3 +571,24 @@ contexto e resposta, e contexto que muda não associa nada.
 - Leroy (2009). *Why is it so hard to do my work? The challenge of attention
   residue when switching between work tasks.* OBHDP.
 - Gollwitzer, sobre implementation intentions.
+- Buehler, Griffin & Ross. *Exploring the "planning fallacy": Why people
+  underestimate their task completion times.*
+- Flyvbjerg, sobre reference class forecasting como antidoto de previsao
+  otimista.
+- Koriat (1997), sobre pistas invalidas no julgamento do proprio aprendizado.
+- Steel (2007). *The nature of procrastination: A meta-analytic and theoretical
+  review of quintessential self-regulatory failure.* Psychological Bulletin.
+- Sirois & Pychyl (2013). *Procrastination and the Priority of Short-Term Mood
+  Regulation.* Social and Personality Psychology Compass.
+- Rozental e colegas, meta-analise de tratamentos psicologicos para
+  procrastinacao (g = 0,34; TCC g = 0,55 com base fraca).
+- Crede & Kuncel (2008). *Study Habits, Skills, and Attitudes: The Third Pillar
+  Supporting Collegiate Academic Performance.*
+- Duckworth & Seligman (2005). *Self-Discipline Outdoes IQ in Predicting
+  Academic Performance of Adolescents.* Psychological Science.
+- Rejeitados por qualidade de evidencia: Ariely & Wertenbroch (2002), prazos
+  autoimpostos, por anomalia nos dados declarada pelo autor; Ward e colegas
+  (2017), presenca do celular, por falha de replicacao e efeito minusculo.
+- Dunlosky, Rawson, e a linha de calibracao com Kruger & Dunning: quem se
+  superestima encerra o estudo cedo, e a ma calibracao e mais forte em quem
+  sabe menos.
