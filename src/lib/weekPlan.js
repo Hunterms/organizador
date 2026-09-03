@@ -66,7 +66,22 @@ export function urgencia(subject, hoje) {
   const naFaixa = prox.covers_from != null
     ? todos.filter(t => t.position >= prox.covers_from && t.position <= prox.covers_to)
     : todos;
-  const restantes = naFaixa.filter(t => t.status !== 'mastered').length;
+  // Pendente = o que ainda pede trabalho ANTES da prova. Duas correcoes que
+  // sairam da simulacao de 12 semanas (02/09/2026):
+  //
+  // 1. `status !== 'mastered'` sozinho nunca caia. Concluir um bloco grava
+  //    last_studied e next_review_at e NAO toca status, entao MS211 chegava a
+  //    7 de 7 topicos estudados com o planejador ainda vendo 7 restantes. O
+  //    peso da materia era calculado sobre um numero que nao se move.
+  // 2. Topico com revisao VENCIDA volta a pendente. Antes, a revisao do Cepeda
+  //    era escolhida na frente da fila (escolheTopico) mas a materia podia nao
+  //    receber bloco nenhum naquele dia: so 25% das revisoes caiam no dia
+  //    previsto, com atraso mediano de 4 dias. Contar a vencida como pendente
+  //    faz a urgencia subir e o bloco aparecer, reusando a cota que ja existe
+  //    em vez de abrir um caminho paralelo pra revisao.
+  const coberto = (t) => t.status === 'mastered'
+    || (t.lastStudied && t.next_review_at && t.next_review_at > hoje);
+  const restantes = naFaixa.filter(t => !coberto(t)).length;
   // Sem topico pendente a materia entra em manutencao, nao some.
   const taxa = restantes ? (restantes / Math.max(dias, 1)) * 100 : 5;
   // Prazo de 2 dias ou menos ainda ganha um empurrao: cobrir vence distribuir.
@@ -172,13 +187,13 @@ function escolheTopico(subject, novo, usados, alvo, hoje) {
     : [vencida, t => t.status === 'difficulty', t => t.status === 'not_studied', () => true];
   for (const filtro of ordem) {
     // Dentro do mesmo balde, o mais esquecido primeiro. Topico nunca tocado
-    // (sem last_studied) vem antes de todos.
+    // (sem lastStudied) vem antes de todos.
     const achou = pool.filter(t => filtro(t) && !usados.has(t.id))
-      .sort((a, b) => (a.last_studied || '').localeCompare(b.last_studied || ''))[0];
+      .sort((a, b) => (a.lastStudied || '').localeCompare(b.lastStudied || ''))[0];
     if (achou) { usados.add(achou.id); return achou; }
   }
   // Faixa esgotada na semana: repete o mais esquecido dela como revisao.
-  return pool.slice().sort((a, b) => (a.last_studied || '').localeCompare(b.last_studied || ''))[0] || null;
+  return pool.slice().sort((a, b) => (a.lastStudied || '').localeCompare(b.lastStudied || ''))[0] || null;
 }
 
 /**
@@ -207,11 +222,20 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
 
   // Cota por materia: proporcional a urgencia, com piso pra materia esquecida
   // ha 14 dias ou mais (docs/METODOS.md regra 2).
+  // Revisao vencida precisa de COTA, nao so de prioridade na fila.
+  // escolheTopico ja punha a vencida na frente, mas so entre os blocos que a
+  // materia recebeu. Materia com cota zero na semana nunca revisava. Medido em
+  // 12 semanas: 25% das revisoes caiam no dia previsto. O canon manda "revisao
+  // vencida entra no topo da fila, antes de conteudo novo", e piso e o mecanismo
+  // que a casa ja usa pra garantir bloco. Reuso dele em vez de um caminho novo.
+  const temVencida = (s, hoje) =>
+    (s.topics || []).some(t => t.next_review_at && t.next_review_at <= hoje);
   const info = ativas.map(s => {
     const u = urgencia(s, inicio);
     const ult = ultimoEstudo[s.id];
     const esquecida = !ult || (new Date(inicio) - new Date(ult)) / 86400000 >= 14;
-    return { s, ...u, piso: esquecida ? 1 : 0 };
+    const vencida = temVencida(s, inicio);
+    return { s, ...u, piso: (esquecida || vencida) ? 1 : 0 };
   });
   const somaPeso = info.reduce((n, i) => n + i.peso, 0);
   let restante = totalBlocos;
@@ -270,7 +294,16 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
         return u.dias !== null && u.dias <= 1;
       });
       const livres = bolsa.filter(x => x.cota > 0 && !noDia.has(x.s.id));
-      const pool = crunch.length ? crunch : (livres.length ? livres : bolsa.filter(x => x.cota > 0));
+      // Ordem de precedencia no dia: avaliacao colada > revisao vencida NAQUELE
+      // dia > resto. A vencida vem antes de conteudo novo porque practice
+      // testing e distributed practice sao as duas tecnicas de utilidade ALTA
+      // (Dunlosky); adiar a revisao pra aprender assunto novo troca a boa pela
+      // media. Medido NA DATA DO DIA, nao na data de inicio da semana.
+      const vencidas = livres.filter(x =>
+        (x.s.topics || []).some(t => t.next_review_at && t.next_review_at <= dias[d]));
+      const pool = crunch.length ? crunch
+        : (vencidas.length ? vencidas
+          : (livres.length ? livres : bolsa.filter(x => x.cota > 0)));
       if (!pool.length) break;
       pool.sort((a, b2) => b2.cota - a.cota || b2.peso - a.peso);
       const escolhido = pool[0];
@@ -333,6 +366,15 @@ export function buildWeekPlan(subjects, inicio, budget = DEFAULT_BUDGET, ultimoE
   // Dentro do dia, ordem do relogio. Bloco sem horario vai pro fim.
   return plano.sort((a, b) =>
     a.date.localeCompare(b.date) || (a.time || '99').localeCompare(b.time || '99'));
+}
+
+// Quantos blocos de 50min cabem num dia, dado o orcamento por dia da semana.
+// Mora aqui e nao no store porque e aritmetica de planejamento, e porque dentro
+// do store nao daria teste. O store usa isto pra nao empilhar num dia mais
+// bloco do que o dia aguenta.
+export function blocosQueCabem(budget, date) {
+  const dow = new Date(date + 'T12:00:00').getDay();
+  return Math.floor((budget?.[dow] ?? 0) / BLOCO_MIN);
 }
 
 // Titulo curto da tarefa que vai pro app.

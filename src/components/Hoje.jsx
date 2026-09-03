@@ -71,7 +71,7 @@ function GameHeader({ stats, onOpen }) {
   );
 }
 
-const catBorder = { aula: 'border-l-cyan-500', estudos: 'border-l-violet-500', trabalho: 'border-l-blue-500', terreiro: 'border-l-green-500', pessoal: 'border-l-amber-500', casa: 'border-l-pink-500' };
+const catBorder = { aula: 'border-l-cyan-500', estudos: 'border-l-violet-500', trabalho: 'border-l-blue-500', terreiro: 'border-l-green-500', espiritual: 'border-l-fuchsia-500', pessoal: 'border-l-amber-500', casa: 'border-l-pink-500' };
 const effortLabel = { '5': '5m', '10': '10m', '30': '30m', '60': '1h', '120': '2h+' };
 
 function SortableTask({ task, onToggle, onDelete, onEdit, onFocus, onGuide }) {
@@ -141,6 +141,26 @@ function SortableTask({ task, onToggle, onDelete, onEdit, onFocus, onGuide }) {
           </button>
         </div>
       </div>
+
+      {/* PORTA DE ENTRADA. Aparece so no bloco de estudo que ainda nao foi
+          aberto — o momento exato da aversao.
+          Steel (2007): aversao a tarefa esta entre os preditores mais fortes de
+          procrastinacao. Sirois e Pychyl: procrastinar e reparo de humor de
+          curto prazo, nao falha de agenda. Nenhum dos dois se resolve com
+          escalonamento, que era a unica coisa que este app sabia fazer.
+          O mecanismo JA existia: keptDay (gamification) segura o dia com 1
+          pomodoro, e o botao de foco ja esta aqui do lado. O que faltava era
+          isso estar VISIVEL na hora de decidir. E copy, nao motor. */}
+      {gated && !task.done && task.category === 'estudos' && (task.pomodoros_done || 0) === 0 && onFocus && (
+        <button onClick={() => onFocus(task)}
+          className="flex items-center gap-2 pl-1 text-left group"
+          aria-label={`Comecar ${task.title} com um pomodoro`}>
+          <Play size={10} className="text-zinc-600 group-hover:text-amber-400 transition-colors shrink-0" aria-hidden="true" />
+          <span className="text-[10px] text-zinc-600 group-hover:text-zinc-400 transition-colors leading-snug">
+            Sem vontade? Um pomodoro so ja segura o dia.
+          </span>
+        </button>
+      )}
     </div>
   );
 }
@@ -215,7 +235,7 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
           subjects: p.subjects.map(sub => ({
             ...sub,
             topics: (sub.topics || []).map(t => t.id === current.topic_id
-              ? { ...t, last_studied: nextDone ? today : t.last_studied,
+              ? { ...t, lastStudied: nextDone ? today : t.lastStudied,
                   next_review_at: nextDone && revisaoEm ? revisaoEm : t.next_review_at,
                   totalStudyMinutes: Math.max(0, (t.totalStudyMinutes || 0) + (nextDone ? min : -min)) }
               : t),
