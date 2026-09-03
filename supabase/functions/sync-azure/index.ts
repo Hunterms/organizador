@@ -52,9 +52,20 @@ const ado = (pat: string) => ({
   "Content-Type": "application/json",
 });
 
-/** Caminhos de iteracao JA ENCERRADOS, pra descartar item esquecido em sprint velha. */
-async function iteracoesPassadas(pat: string, projetos: string[]) {
-  const mortas = new Set<string>();
+/**
+ * Caminhos das iteracoes CORRENTES. Decisao do Hunter em 03/09/2026: so entra
+ * o que esta na sprint corrente. Isso descarta tres coisas de uma vez: sprint
+ * encerrada, sprint futura, e item na RAIZ do projeto (sem iteracao nenhuma).
+ *
+ * O que ele perde com isso, e ele sabe: 3 itens ativos que estao em
+ * `CPF Seguro` sem sprint (#863 Revisao regulatorio do Pix, #3137 e #3138).
+ * Se deveriam contar, o lugar de arrastar pra Sprint 20 e o Azure, nao aqui.
+ *
+ * Comparacao por PATH, nunca por nome: "Sprint 1" do CPF Seguro fechou em
+ * 08/2025 e "Sprint 1" do HDSC e a corrente.
+ */
+async function iteracoesCorrentes(pat: string, projetos: string[]) {
+  const atuais = new Set<string>();
   for (const proj of projetos) {
     try {
       const r = await fetch(
@@ -64,11 +75,11 @@ async function iteracoesPassadas(pat: string, projetos: string[]) {
       if (!r.ok) continue;
       const d = await r.json();
       for (const it of d.value || []) {
-        if (it?.attributes?.timeFrame === "past" && it.path) mortas.add(it.path);
+        if (it?.attributes?.timeFrame === "current" && it.path) atuais.add(it.path);
       }
     } catch { /* projeto sem time configurado: nao derruba o resto */ }
   }
-  return mortas;
+  return atuais;
 }
 
 async function sincroniza(admin: ReturnType<typeof createClient>) {
@@ -82,7 +93,7 @@ async function sincroniza(admin: ReturnType<typeof createClient>) {
     const uid = (s as { user_id: string }).user_id;
     const pat = (s as { valor: string }).valor;
     const avisos: string[] = [];
-    let criadas = 0, descartadas = 0;
+    let criadas = 0, descartadas = 0, movidas = 0;
 
     try {
       const estados = ATIVOS.map((e) => `'${e}'`).join(",");
@@ -107,13 +118,38 @@ async function sincroniza(admin: ReturnType<typeof createClient>) {
       const itens = ((await rd.json()).value || []) as { id: number; fields: Record<string, string> }[];
 
       const projetos = [...new Set(itens.map((i) => i.fields["System.TeamProject"]).filter(Boolean))];
-      const mortas = await iteracoesPassadas(pat, projetos);
+      const correntes = await iteracoesCorrentes(pat, projetos);
+
+      // Tarefas que este sync ja criou antes, pra mover a data em vez de
+      // duplicar. A v1 punha a data na chave (`ado-863-2026-09-03`), entao o
+      // mesmo item virava tarefa nova TODO DIA: em cinco dias o #863 existia
+      // cinco vezes, em cinco datas, nenhuma feita. Era a pilha de novo, com
+      // fonte nova.
+      const { data: jaTem } = await admin
+        .from("tasks").select("id, ical_uid, date, done")
+        .eq("user_id", uid).like("ical_uid", "ado-%");
+      const porUid = new Map((jaTem || []).map((t) => [(t as { ical_uid: string }).ical_uid, t]));
 
       for (const it of itens) {
         const f = it.fields;
         const iter = f["System.IterationPath"];
-        // Item em sprint encerrada e backlog esquecido, nao trabalho de hoje.
-        if (iter && mortas.has(iter)) { descartadas++; continue; }
+        // Fora da sprint corrente nao entra: isso cobre sprint encerrada,
+        // sprint futura, e item na raiz do projeto (sem iteracao nenhuma).
+        if (!iter || !correntes.has(iter)) { descartadas++; continue; }
+
+        // Uma linha por work item, e a DATA SEGUE O HOJE enquanto ele nao
+        // fechar. Work item ativo E o trabalho de hoje ate deixar de ser.
+        // Marcado como feito no app: nao mexe, ele decidiu que acabou.
+        const uidTarefa = `ado-${it.id}`;
+        const antiga = porUid.get(uidTarefa) as { id: string; date: string; done: boolean } | undefined;
+        if (antiga) {
+          if (!antiga.done && antiga.date !== hoje) {
+            const { error: e2 } = await admin.from("tasks")
+              .update({ date: hoje }).eq("id", antiga.id);
+            if (!e2) movidas++; else avisos.push(`${e2.code} movendo #${it.id}`);
+          }
+          continue;
+        }
 
         const { error: e1 } = await admin.from("tasks").insert({
           user_id: uid,
@@ -124,14 +160,14 @@ async function sincroniza(admin: ReturnType<typeof createClient>) {
           done: false,
           recurring: false,
           source: "work_calendar",
-          // Reusa a dedupe unica por (user_id, ical_uid) que ja existe: a chave
-          // aqui e o id do work item, estavel e por dia.
-          ical_uid: `ado-${it.id}-${hoje}`,
+          // Chave estavel por work item, SEM a data: e ela que garante uma
+          // linha so por item, em vez de uma por item por dia.
+          ical_uid: uidTarefa,
         });
         if (!e1) criadas++;
         else if (e1.code !== "23505") avisos.push(`${e1.code} em #${it.id}`);
       }
-      relatorio.push({ user: uid, ativas: itens.length, criadas, descartadas, avisos });
+      relatorio.push({ user: uid, ativas: itens.length, criadas, movidas, descartadas, avisos });
     } catch (e) {
       relatorio.push({ user: uid, erro: String(e).slice(0, 120) });
     }
