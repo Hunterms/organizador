@@ -3,6 +3,7 @@ import { X, Brain, Send, Loader2, Timer, Lightbulb } from 'lucide-react';
 import {
   updateTopic as updateTopicDb,
   createRetrievalAttempt as createRetrievalAttemptDb,
+  getDateKey,
 } from '../store';
 import { calculateNextReview } from '../lib/studyMethods';
 
@@ -15,9 +16,22 @@ import { calculateNextReview } from '../lib/studyMethods';
 //   4. Writes back: topic.confidence/status/next_review_at + retrieval_attempt
 // ==========================================================================
 
+// `status: null` = nao mexe no status do topico.
+//
+// Antes, nota 4 e 5 carimbavam `mastered`, e `mastered` tira o topico da conta
+// de "quanto falta pra prova" em weekPlan.js. Ou seja: um "quase tudo, falhei
+// um detalhe" numa noite boa reduzia os blocos daquela materia pelo resto do
+// semestre. A literatura de calibracao diz que esse e o pior sinal possivel
+// pra essa decisao: quem se superestima encerra o estudo cedo e a retencao cai,
+// e a ma calibracao e mais forte justamente em quem ainda sabe menos (Koriat
+// 1997; Dunlosky, Rawson, Kruger e Dunning).
+//
+// Agora auto-avaliacao alta so ESPACA a revisao (via next_review_at), que e
+// reversivel: quando a revisao vence, o topico volta a contar como pendente.
+// `mastered` passa a exigir acerto verificado, nao sensacao.
 const RATING_META = {
-  5: { label: 'Sabia sem titubear', status: 'mastered', color: 'bg-green-500', text: 'text-green-400' },
-  4: { label: 'Quase tudo, falhei um detalhe', status: 'mastered', color: 'bg-emerald-500', text: 'text-emerald-400' },
+  5: { label: 'Sabia sem titubear', status: null, color: 'bg-green-500', text: 'text-green-400' },
+  4: { label: 'Quase tudo, falhei um detalhe', status: null, color: 'bg-emerald-500', text: 'text-emerald-400' },
   3: { label: 'Lembrei mais ou menos', status: 'difficulty', color: 'bg-amber-500', text: 'text-amber-400' },
   2: { label: 'Só fragmentos', status: 'difficulty', color: 'bg-orange-500', text: 'text-orange-400' },
   1: { label: 'Em branco', status: 'not_studied', color: 'bg-red-500', text: 'text-red-400' },
@@ -57,14 +71,18 @@ export default function RetrievalModal({ topic, subject, userId, onClose, onTopi
     const nextReviewAt = calculateNextReview(score, topic.confidence || 0);
     // Optimistic patch for the parent state
     const topicPatch = {
-      status: meta.status,
       confidence: score,
       last_retrieval_at: new Date().toISOString(),
+      // Sem lastStudied a cobertura em weekPlan.js nao reconhece a tentativa:
+      // `coberto` pede os dois campos. Retrieval E estudo, e o mais util deles.
+      lastStudied: getDateKey(),
       next_review_at: nextReviewAt,
       retrieval_count: (topic.retrieval_count || 0) + 1,
     };
-    if (meta.status === 'mastered' && reflection.trim()) topicPatch.feynman_note = reflection.trim();
-    if (meta.status === 'difficulty' && reflection.trim()) topicPatch.why_difficult = reflection.trim();
+    // status null = nota alta, nao carimba nada (ver RATING_META).
+    if (meta.status) topicPatch.status = meta.status;
+    if (score >= 4 && reflection.trim()) topicPatch.feynman_note = reflection.trim();
+    if (score <= 3 && reflection.trim()) topicPatch.why_difficult = reflection.trim();
 
     onTopicUpdated?.(topicPatch); // parent updates local state
 

@@ -1,9 +1,11 @@
 import { supabase } from './lib/supabase';
 import { getDateKey } from './lib/attendance';
-import { buildWeekPlan, tituloBloco, BLOCO_MIN, intervaloCepeda } from './lib/weekPlan';
+import { buildWeekPlan, tituloBloco, BLOCO_MIN, intervaloCepeda, blocosQueCabem } from './lib/weekPlan';
 export { intervaloCepeda };
 import { classDates } from './lib/attendance';
 import { caiHoje } from './lib/rotina';
+import { orcamentoMedido } from './lib/orcamento';
+import { preparoDeHoje } from './lib/eventos';
 
 // ==========================================================================
 // State shape (same as before, but hydrated from Supabase)
@@ -11,6 +13,7 @@ import { caiHoje } from './lib/rotina';
 const defaultState = {
   tasks: [],
   subjects: [],
+  eventos: [],
   kanban: { todo: [], doing: [], done: [] },
   water: {},
   homeRoutine: {},
@@ -56,6 +59,7 @@ export async function fetchAllData(userId) {
     { data: customRooms },
     { data: kanbanCards },
     { data: attendance },
+    { data: eventos },
   ] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', userId).single(),
     // Fetch all; we filter dismissed out client-side below so the app still
@@ -70,6 +74,7 @@ export async function fetchAllData(userId) {
     supabase.from('custom_rooms').select('*').eq('user_id', userId),
     supabase.from('kanban_cards').select('*').eq('user_id', userId).order('position'),
     supabase.from('attendance').select('*').eq('user_id', userId),
+    supabase.from('eventos').select('*').eq('user_id', userId),
   ]);
 
   // Water as map { 'YYYY-MM-DD': bottles }
@@ -173,6 +178,12 @@ export async function fetchAllData(userId) {
       place: t.place || '',
     })),
     subjects: subjectsWithChildren,
+    // Eventos com preparo (gira e afins). A lib eventos.js espera exatamente
+    // estas chaves; a tabela guarda checklist e recorrencia como JSONB.
+    eventos: (eventos || []).filter(e => e.ativo !== false).map(e => ({
+      id: e.id, nome: e.nome, categoria: e.categoria || 'terreiro', place: e.place || '',
+      datas: e.datas || [], recorrencia: e.recorrencia || null, checklist: e.checklist || [],
+    })),
     kanban,
     water,
     attendance: attendanceFormatted,
@@ -215,6 +226,8 @@ export async function createTask(userId, task) {
   if (task.topic_id) payload.topic_id = task.topic_id;
   if (task.subject_id) payload.subject_id = task.subject_id;
   if (task.place) payload.place = task.place;
+  if (task.evento_id) payload.evento_id = task.evento_id;
+  if (task.evento_data) payload.evento_data = task.evento_data;
   const { data, error } = await supabase.from('tasks').insert(payload).select().single();
   if (error) throw error;
   return { id: data.id, ...task };
@@ -487,6 +500,70 @@ export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, cust
     } catch (e) { console.error('ensureTodayRoutineTasks failed for', key, e); }
   }
   return created;
+}
+
+// ---- Eventos (CRUD minimo) -----------------------------------------------
+// O que muda com frequencia e a DATA (a gira do mes que vem). O checklist e
+// template: se assenta uma vez e fica. Por isso a tela edita data, e checklist
+// se mexe pelo seed. Se um dia o checklist virar volatil, ele ganha tela.
+export async function createEvento(userId, ev) {
+  const { data, error } = await supabase.from('eventos').insert({
+    user_id: userId, nome: ev.nome, categoria: ev.categoria || 'terreiro',
+    place: ev.place || '', datas: ev.datas || [],
+    recorrencia: ev.recorrencia || null, checklist: ev.checklist || [],
+  }).select().single();
+  if (error) throw error;
+  return { id: data.id, nome: data.nome, categoria: data.categoria, place: data.place || '',
+    datas: data.datas || [], recorrencia: data.recorrencia || null, checklist: data.checklist || [] };
+}
+
+export async function updateEvento(eventoId, updates) {
+  const db = {};
+  for (const k of ['nome', 'categoria', 'place', 'datas', 'recorrencia', 'checklist', 'ativo']) {
+    if (k in updates) db[k] = updates[k];
+  }
+  const { error } = await supabase.from('eventos').update(db).eq('id', eventoId);
+  if (error) throw error;
+}
+
+export async function deleteEvento(eventoId) {
+  // ON DELETE CASCADE em tasks.evento_id leva o preparo ja gerado junto: item
+  // de "Gira em 3d" sem gira e lixo na lista de Hoje.
+  const { error } = await supabase.from('eventos').delete().eq('id', eventoId);
+  if (error) throw error;
+}
+
+// Preparo de evento vira tarefa de hoje. Mesmo molde do ensureTodayRoutineTasks,
+// com uma diferenca que importa: a dedupe NAO pode ser por titulo. O titulo
+// carrega "(Gira em 3d)", e esse sufixo muda todo dia — dedupe por titulo
+// recriaria o item a cada abertura do app com um numero diferente. Por isso a
+// tarefa guarda evento_id + evento_data, e a chave e o par.
+export async function ensureTodayEventTasks(userId, { tasks, eventos }) {
+  const today = getDateKey();
+  const itens = preparoDeHoje(eventos, today);
+  if (!itens.length) return [];
+  // Chave estavel: evento + data do evento + titulo base (sem o sufixo de dias).
+  const base = (t) => t.replace(/\s*\([^)]*em \d+d\)\s*$/, '').toLowerCase();
+  const existentes = new Set((tasks || [])
+    .filter(t => t.date === today)
+    .map(t => t.evento_id
+      ? `${t.evento_id}|${t.evento_data}|${base(t.title)}`
+      : `titulo|${base(t.title)}`));
+  const criadas = [];
+  for (const i of itens) {
+    const chave = `${i.eventoId}|${i.data}|${base(i.titulo)}`;
+    if (existentes.has(chave) || existentes.has(`titulo|${base(i.titulo)}`)) continue;
+    try {
+      const saved = await createTask(userId, {
+        title: i.titulo, category: i.categoria, effort: i.effort, time: i.time,
+        done: false, date: today, recurring: false, place: i.place,
+        evento_id: i.eventoId, evento_data: i.data,
+      });
+      criadas.push(saved);
+      existentes.add(chave);
+    } catch (e) { console.error('ensureTodayEventTasks falhou para', i.titulo, e); }
+  }
+  return criadas;
 }
 
 // Aulas de hoje viram tarefa com horario. Sem isso a aula nao existe na lista
@@ -929,8 +1006,26 @@ export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) 
   const compromissos = (state.settings?.busyWindows || []).length
     ? [{ id: '__ocupado', code: '', class_schedule: state.settings.busyWindows, topics: [], exams: [] }]
     : [];
+  // ultimoEstudo: ultima data estudada por materia. Ia vazio ({}), e com o mapa
+  // vazio `esquecida` era sempre true em buildWeekPlan, entao o piso de 1 bloco
+  // valia pra TODAS as 7 materias TODA semana. Medido em 02/09/2026: 7 dos 18
+  // blocos da semana ficavam presos no piso, contra a regra 2 do canon, que
+  // pede piso QUINZENAL ("nenhuma materia zera duas semanas seguidas").
+  const ultimoEstudo = {};
+  for (const s of state.subjects || []) {
+    const datas = (s.topics || []).map(t => t.lastStudied).filter(Boolean).sort();
+    if (datas.length) ultimoEstudo[s.id] = datas[datas.length - 1];
+  }
+  // Orcamento MEDIDO, nao declarado: mediana do que ele realmente fecha por dia
+  // da semana nas ultimas 4 semanas, com teto no declarado e piso de 1 bloco.
+  // Sem base suficiente cai no declarado. Ver src/lib/orcamento.js pro porque
+  // (falacia do planejamento, e reference class forecasting como antidoto).
+  const declarado = weekBudget(state.settings);
+  const orcamento = orcamentoMedido(state.tasks, inicio, declarado);
+  const capacidadeDe = (date) => blocosQueCabem(orcamento, date);
+
   const plano = buildWeekPlan([...(state.subjects || []), ...compromissos], inicio,
-    weekBudget(state.settings), {}, state.settings?.morningDays || [], state.settings?.studyPlace || '');
+    orcamento, ultimoEstudo, state.settings?.morningDays || [], state.settings?.studyPlace || '');
   if (!plano.length) return [];
   // Dedupe por data+MATERIA, nao por titulo. Titulo carrega o topico escolhido,
   // e duas geracoes do mesmo domingo podem escolher topicos diferentes: o
@@ -942,6 +1037,18 @@ export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) 
   const ocupado = new Set((state.tasks || [])
     .filter(t => t.category === 'estudos')
     .map(t => `${t.date}|${subjectDe(t) || t.title}`));
+  // TETO POR DIA. A dedupe por data+materia impede a MESMA materia duas vezes
+  // no dia e nao impede SETE materias diferentes no mesmo dia. Esta funcao roda
+  // a cada abertura do app, replanejando 7 dias a partir de hoje: cada rodada
+  // punha uma materia nova numa data futura, com chave diferente, e o dia
+  // empilhava. Medido em 12 semanas (02/09/2026): 515 blocos criados contra um
+  // orcamento de 216, 78 de 84 dias estourados, e tercas de 2 blocos com 7.
+  // Um dia que mente sobre o proprio tamanho derruba o streak e o dado todo.
+  const noDia = {};
+  for (const t of state.tasks || []) {
+    if (t.category !== 'estudos' || !t.date) continue;
+    noDia[t.date] = (noDia[t.date] || 0) + 1;
+  }
   // Um bloco de 50min nao fecha com 1 pomodoro de 25. Deriva do foco configurado
   // em vez de fixar 1, senao da pra marcar o bloco como feito na metade dele.
   const foco = state.pomodoroSettings?.focusDuration || 25;
@@ -951,6 +1058,7 @@ export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) 
   for (const b of plano) {
     const title = tituloBloco(b);
     if (ocupado.has(`${b.date}|${b.subjectId}`) || ocupado.has(`${b.date}|${title}`)) continue;
+    if ((noDia[b.date] || 0) >= capacidadeDe(b.date)) continue; // dia cheio
     try {
       const guide_id = await ensureMethodGuide(userId, guias, b);
       const saved = await createTask(userId, {
@@ -961,6 +1069,7 @@ export async function ensureWeekPlanTasks(userId, state, inicio = getDateKey()) 
       });
       criadas.push({ ...saved, guide_id });
       ocupado.add(`${b.date}|${b.subjectId}`);
+      noDia[b.date] = (noDia[b.date] || 0) + 1;
     } catch (e) { console.error('bloco do plano falhou:', title, e); }
   }
   return criadas;

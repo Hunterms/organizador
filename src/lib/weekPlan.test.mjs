@@ -138,7 +138,10 @@ for (const b of plano) {
 const comHistorico = [{
   id: 'x', code: 'MS211', class_schedule: [{ day: 2, time: '19:00', duration: 120 }],
   topics: [
-    { id: 'velho', name: 'ja visto', status: 'not_studied', last_studied: '2026-08-29' },
+    // `lastStudied` (camel) e a forma que fetchAllData produz no estado. Este
+    // teste usava `last_studied` e passava, porque o weekPlan lia a mesma
+    // grafia errada: a ordem por esquecimento nunca valeu com dado real.
+    { id: 'velho', name: 'ja visto', status: 'not_studied', lastStudied: '2026-08-29' },
     { id: 'novo', name: 'nunca visto', status: 'not_studied' },
   ],
   exams: [{ name: 'P1', date: '2026-10-06', status: 'pendente' }],
@@ -290,3 +293,72 @@ const ultimoFim = Number(sab[sab.length - 1].slice(0, 2)) * 60 + 50;
 assert.ok(16 * 60 - ultimoFim >= 60,
   `so ${16 * 60 - ultimoFim} min entre o ultimo bloco (${sab[sab.length - 1]}) e o terreiro`);
 console.log('ok — folga de', 16 * 60 - ultimoFim, 'min antes do compromisso');
+
+// --- teto de blocos por dia --------------------------------------------------
+// store.js usa isto pra nao empilhar num dia mais bloco do que o dia aguenta.
+// Medido em 02/09/2026: sem teto, o replanejamento diario criava 515 blocos
+// contra um orcamento de 216, e uma terca de 2 blocos recebia 7.
+{
+  const { blocosQueCabem } = await import('./weekPlan.js');
+  const orc = [240, 120, 120, 120, 120, 120, 240];
+  assert.equal(blocosQueCabem(orc, '2026-09-06'), 4, 'domingo: 240/50 = 4 blocos');
+  assert.equal(blocosQueCabem(orc, '2026-09-07'), 2, 'segunda: 120/50 = 2 blocos');
+  assert.equal(blocosQueCabem(orc, '2026-09-12'), 4, 'sabado: 4 blocos');
+  assert.equal(blocosQueCabem([], '2026-09-07'), 0, 'sem orcamento, nada cabe');
+  assert.equal(blocosQueCabem(undefined, '2026-09-07'), 0, 'orcamento ausente nao explode');
+  console.log('ok — teto de blocos por dia');
+}
+
+// --- cobertura responde ao trabalho feito ------------------------------------
+// Antes, `restantes` era `status !== 'mastered'`, e concluir um bloco nao toca
+// status: MS211 chegava a 7 de 7 topicos estudados com o planejador ainda vendo
+// 7 restantes, e o peso da materia saia de um numero que nunca se movia.
+{
+  const base = () => ({
+    id: 'x', code: 'MS211', topics: [
+      { id: 'a', name: 'a', status: 'not_studied', position: 1 },
+      { id: 'b', name: 'b', status: 'not_studied', position: 2 },
+      { id: 'c', name: 'c', status: 'not_studied', position: 3 },
+    ],
+    exams: [{ name: 'Prova 1', date: '2026-10-06', status: 'pendente' }],
+  });
+  const hoje = '2026-09-06';
+  assert.equal(urgencia(base(), hoje).restantes, 3, 'nada estudado: 3 pendentes');
+
+  const estudado = base();
+  estudado.topics[0].lastStudied = hoje;
+  estudado.topics[0].next_review_at = '2026-09-11'; // revisao no futuro
+  assert.equal(urgencia(estudado, hoje).restantes, 2,
+    'topico estudado com revisao no futuro sai da conta');
+
+  const vencido = base();
+  vencido.topics[0].lastStudied = '2026-08-20';
+  vencido.topics[0].next_review_at = '2026-09-01'; // revisao VENCIDA
+  assert.equal(urgencia(vencido, hoje).restantes, 3,
+    'revisao vencida volta a contar como pendente');
+
+  const semRevisao = base();
+  semRevisao.topics[0].lastStudied = hoje; // estudado, sem data de revisao
+  assert.equal(urgencia(semRevisao, hoje).restantes, 3,
+    'estudado sem revisao agendada continua pendente');
+  console.log('ok — cobertura responde ao trabalho, e a vencida volta');
+}
+
+// --- revisao vencida garante bloco, nao so lugar na fila --------------------
+// escolheTopico ja punha a vencida na frente, mas so entre os blocos que a
+// materia recebeu. Materia com cota zero nunca revisava.
+{
+  const semProva = {
+    id: 'z', code: 'MC621', class_schedule: [],
+    topics: [{ id: 'z1', name: 'z1', status: 'not_studied', position: 1,
+               lastStudied: '2026-08-25', next_review_at: '2026-09-01' }],
+    exams: [],
+  };
+  const outras = S.map(s => ({ ...s }));
+  const recente = {};
+  for (const s of [...outras, semProva]) recente[s.id] = '2026-09-05'; // ninguem "esquecido"
+  const p = buildWeekPlan([...outras, semProva], '2026-09-06', undefined, recente);
+  assert.ok(p.filter(b => b.subjectId === 'z').length >= 1,
+    'materia sem prova mas com revisao vencida tem que receber bloco');
+  console.log('ok — revisao vencida garante cota');
+}
