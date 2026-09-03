@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, Component } from 'react';
-import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey, ensureTodayRoutineTasks, updateProfile as updateProfileDb, ensureWeekPlanTasks, ensureTodayClassTasks } from './store';
+import { loadCache, saveCache, fetchAllData, createTask, updateTask as updateTaskDb, defaultState, getDateKey, ensureTodayRoutineTasks, updateProfile as updateProfileDb, ensureWeekPlanTasks, ensureTodayClassTasks, ensureTodayEventTasks } from './store';
 import { buildCircularTask } from './lib/circular';
 import { useAuth } from './lib/auth';
 import Login from './components/Login';
 import Hoje from './components/Hoje';
 import Estudos from './components/Estudos';
 import Casa from './components/Casa';
+import Eventos from './components/Eventos';
 import Agua from './components/Agua';
 import Pomodoro from './components/Pomodoro';
 import AIPanel from './components/AIPanel';
@@ -24,7 +25,7 @@ const tabs = [
   { id: 'agua', label: 'Agua', icon: Droplets },
 ];
 
-const categories = ['aula', 'estudos', 'trabalho', 'terreiro', 'pessoal', 'casa'];
+const categories = ['aula', 'estudos', 'trabalho', 'terreiro', 'espiritual', 'pessoal', 'casa'];
 const efforts = [
   { v: '5', l: '5m' },
   { v: '10', l: '10m' },
@@ -94,6 +95,17 @@ function OrganizadorApp() {
             if (aulas.length) setState(prev => ({ ...prev, tasks: [...prev.tasks, ...aulas] }));
             localStorage.setItem(aulaFlag, '1');
           } catch (e) { console.error('class task auto-gen failed:', e); }
+        }
+
+        // Preparo de evento (gira e afins) vira tarefa de hoje. Mesmo padrao de
+        // flag diaria dos outros geradores, pra nao reinserir a cada abertura.
+        const evFlag = 'eventos_gen_' + getDateKey();
+        if (!localStorage.getItem(evFlag)) {
+          try {
+            const itens = await ensureTodayEventTasks(user.id, data);
+            if (itens.length) setState(prev => ({ ...prev, tasks: [...prev.tasks, ...itens] }));
+            localStorage.setItem(evFlag, '1');
+          } catch (e) { console.error('event task auto-gen failed:', e); }
         }
 
         const dayFlag = 'routine_gen_' + getDateKey();
@@ -352,11 +364,14 @@ function OrganizadorApp() {
               className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-white rounded-xl -ml-2">
               <X size={20} />
             </button>
-            <h2 className="text-base font-semibold text-white">{profilePage === 'casa' ? 'Rotina de casa' : 'Assistente IA'}</h2>
+            <h2 className="text-base font-semibold text-white">{profilePage === 'casa' ? 'Rotina' : 'Assistente IA'}</h2>
           </div>
           <div className="flex-1 overflow-y-auto page-x pt-5 pb-10">
             {profilePage === 'casa'
-              ? <Casa state={state} updateState={updateState} userId={user?.id} />
+              ? (<div className="section-gap flex flex-col">
+                  <Eventos state={state} updateState={updateState} userId={user?.id} />
+                  <Casa state={state} updateState={updateState} userId={user?.id} />
+                </div>)
               : <AIPanel state={state} updateState={updateState} userId={user?.id} />}
           </div>
         </div>

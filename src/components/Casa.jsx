@@ -9,6 +9,7 @@ import {
   createTask as createTaskDb,
   updateTask as updateTaskDb,
 } from '../store';
+import { caiHoje } from '../lib/rotina';
 
 const defaultRooms = [
   { key: 'areia_gato', label: 'Limpar areia do gato', icon: 'Cat', color: 'text-amber-400' },
@@ -47,24 +48,48 @@ export default function Casa({ state, updateState, userId }) {
   const today = getDateKey();
   const dayOfWeek = new Date().getDay();
   const [showAddRoom, setShowAddRoom] = useState(false);
-  const [newRoom, setNewRoom] = useState({ label: '', icon: 'Sofa', color: 'text-blue-400', days: [] });
-  const [editingKey, setEditingKey] = useState(null);
+  const [newRoom, setNewRoom] = useState({ label: '', icon: 'Sofa', color: 'text-blue-400', days: [], categoria: 'casa', intervalo: 1 });
 
   // Get all rooms (defaults + custom from state)
   const customRooms = state.customRooms || [];
-  const allRooms = [...defaultRooms, ...customRooms].filter(r => state.homeRoutine[r.key] !== undefined || customRooms.some(c => c.key === r.key));
   // Ensure all default rooms still show even if removed from homeRoutine (for visibility)
   const rooms = [...defaultRooms, ...customRooms];
 
-  const todayRoutine = rooms.filter(room => {
-    const config = state.homeRoutine[room.key];
-    return config && config.days.includes(dayOfWeek);
-  });
+  // A categoria da LINHA manda, nao 'casa' cravado. Com 'casa' fixo, rotina de
+  // outra categoria (pilates, escala do terreiro, cuidado com os guias) nunca
+  // casava com a tarefa do dia: aparecia sempre como nao feita e o clique criava
+  // uma tarefa 'casa' duplicada.
+  const catDe = (room) => state.homeRoutine[room.key]?.category || 'casa';
+
+  // A tela nasceu "Casa" e o motor por baixo (home_routine + rotina.js) virou
+  // generico: treino, escala de midia do terreiro, ritual de projeto e cuidado
+  // com os guias entram por ele. Sem agrupar, 22 linhas viram uma lista sem
+  // hierarquia e a rotina de casa se afoga no resto.
+  const GRUPOS = [
+    { cat: 'casa', label: 'Casa', cor: 'text-pink-400' },
+    { cat: 'espiritual', label: 'Guias', cor: 'text-fuchsia-400' },
+    { cat: 'terreiro', label: 'Terreiro', cor: 'text-green-400' },
+    { cat: 'trabalho', label: 'Trabalho', cor: 'text-blue-400' },
+    { cat: 'pessoal', label: 'Pessoal', cor: 'text-amber-400' },
+  ];
+  const gruposComItem = GRUPOS
+    .map(g => ({ ...g, itens: rooms.filter(r => state.homeRoutine[r.key] && catDe(r) === g.cat) }))
+    .filter(g => g.itens.length);
+
+  // caiHoje, o mesmo do gerador de tarefa (store.js) e do push (edge function).
+  // Antes era `days.includes(dayOfWeek)`, que ignora interval_weeks: item
+  // quinzenal aparecia aqui toda semana, inclusive nas que nao geraram tarefa.
+  // O cabecalho do rotina.js avisa disso: "se os dois discordarem, a tarefa
+  // duplica ou some".
+  const todayRoutine = rooms.filter(room => caiHoje(state.homeRoutine[room.key], today));
 
   const isTmp = (id) => typeof id === 'string' && id.startsWith('tmp-');
 
+  const achaTask = (room) => state.tasks.find(t =>
+    t.date === today && t.category === catDe(room) && t.title === room.label);
+
   const toggleDone = async (room) => {
-    const existingTask = state.tasks.find(t => t.date === today && t.category === 'casa' && t.title === room.label);
+    const existingTask = achaTask(room);
     if (existingTask) {
       const newDone = !existingTask.done;
       updateState(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === existingTask.id ? { ...t, done: newDone } : t) }));
@@ -74,7 +99,9 @@ export default function Casa({ state, updateState, userId }) {
     } else {
       // New task created as already-done (user tapped the routine item).
       const tmpId = 'tmp-' + Date.now();
-      const draft = { id: tmpId, title: room.label, category: 'casa', effort: '30', time: '', done: true, date: today, recurring: true };
+      const cfg = state.homeRoutine[room.key] || {};
+      const draft = { id: tmpId, title: room.label, category: catDe(room),
+        effort: cfg.effort || '30', time: cfg.time || '', done: true, date: today, recurring: true };
       updateState(prev => ({ ...prev, tasks: [...prev.tasks, draft] }));
       if (userId) {
         try {
@@ -85,10 +112,7 @@ export default function Casa({ state, updateState, userId }) {
     }
   };
 
-  const getTaskDone = (room) => {
-    const task = state.tasks.find(t => t.date === today && t.category === 'casa' && t.title === room.label);
-    return task?.done || false;
-  };
+  const getTaskDone = (room) => achaTask(room)?.done || false;
 
   const toggleDay = (roomKey, dayIdx) => {
     // Compute next days synchronously, outside the setState updater. Capturing
@@ -112,18 +136,23 @@ export default function Casa({ state, updateState, userId }) {
     if (!newRoom.label.trim()) return;
     const key = 'custom_' + Date.now();
     const room = { key, label: newRoom.label.trim(), icon: newRoom.icon, color: newRoom.color };
+    // categoria e intervalo entram no estado local tambem, senao o item nasce no
+    // grupo errado e a checkbox procura tarefa da categoria errada ate o
+    // proximo fetch.
+    const cfg = { days: newRoom.days, category: newRoom.categoria, interval_weeks: newRoom.intervalo };
     updateState(prev => ({
       ...prev,
       customRooms: [...(prev.customRooms || []), room],
-      homeRoutine: { ...prev.homeRoutine, [key]: { days: newRoom.days } },
+      homeRoutine: { ...prev.homeRoutine, [key]: cfg },
     }));
     const daysCopy = newRoom.days;
-    setNewRoom({ label: '', icon: 'Sofa', color: 'text-blue-400', days: [] });
+    const extraCopy = { category: newRoom.categoria, interval_weeks: newRoom.intervalo };
+    setNewRoom({ label: '', icon: 'Sofa', color: 'text-blue-400', days: [], categoria: 'casa', intervalo: 1 });
     setShowAddRoom(false);
     if (userId) {
       try {
         await createCustomRoomDb(userId, room);
-        await updateHomeRoutineDb(userId, key, daysCopy);
+        await updateHomeRoutineDb(userId, key, daysCopy, extraCopy);
       } catch (e) { console.error('addRoom sync failed:', e); }
     }
   };
@@ -137,7 +166,6 @@ export default function Casa({ state, updateState, userId }) {
         customRooms: (prev.customRooms || []).filter(r => r.key !== roomKey),
       };
     });
-    setEditingKey(null);
     if (userId) {
       try {
         await deleteHomeRoutineDb(userId, roomKey);
@@ -244,6 +272,32 @@ export default function Casa({ state, updateState, userId }) {
                 })}
               </div>
             </div>
+            <div>
+              <p className="text-[11px] text-zinc-500 mb-2">Onde isso vive</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {GRUPOS.map(g => (
+                  <button key={g.cat} onClick={() => setNewRoom(p => ({ ...p, categoria: g.cat }))}
+                    aria-pressed={newRoom.categoria === g.cat}
+                    className={`h-10 rounded-lg text-[11px] font-medium transition-colors ${
+                      newRoom.categoria === g.cat ? `bg-zinc-700 ${g.cor}` : 'bg-zinc-800/60 text-zinc-500 hover:bg-zinc-800'}`}>
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-[11px] text-zinc-500 mb-2">Com que frequencia</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[[1, 'Toda semana'], [2, 'Quinzenal'], [4, 'Mensal']].map(([n, rotulo]) => (
+                  <button key={n} onClick={() => setNewRoom(p => ({ ...p, intervalo: n }))}
+                    aria-pressed={newRoom.intervalo === n}
+                    className={`h-10 rounded-lg text-[11px] font-medium transition-colors ${
+                      newRoom.intervalo === n ? 'bg-pink-500/25 text-pink-300' : 'bg-zinc-800/60 text-zinc-500 hover:bg-zinc-800'}`}>
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+            </div>
             <button onClick={addRoom} disabled={!newRoom.label.trim() || newRoom.days.length === 0}
               className="w-full bg-pink-500 hover:bg-pink-400 disabled:opacity-20 text-white py-2.5 rounded-xl text-xs font-medium transition-colors">
               Criar tarefa
@@ -251,12 +305,18 @@ export default function Casa({ state, updateState, userId }) {
           </div>
         )}
 
-        <div className="flex flex-col gap-5">
-          {rooms.map(room => {
+        <div className="flex flex-col gap-6">
+          {gruposComItem.map(grupo => (
+          <div key={grupo.cat} className="flex flex-col gap-5">
+            {gruposComItem.length > 1 && (
+              <p className={`text-[10px] font-semibold uppercase tracking-wide ${grupo.cor}`}>
+                {grupo.label} <span className="text-zinc-700 font-normal">· {grupo.itens.length}</span>
+              </p>
+            )}
+          {grupo.itens.map(room => {
             const config = state.homeRoutine[room.key];
             if (!config) return null;
             const Icon = iconMap[room.icon] || Sofa;
-            const isEditing = editingKey === room.key;
             const isCustom = room.key.startsWith('custom_');
             return (
               <div key={room.key} className="flex flex-col gap-3">
@@ -289,6 +349,8 @@ export default function Casa({ state, updateState, userId }) {
               </div>
             );
           })}
+          </div>
+          ))}
         </div>
         <p className="text-[11px] text-zinc-600 mt-6 pt-5 border-t border-zinc-800/60">* Cozinha e louca: seu namorado cuida</p>
       </div>
