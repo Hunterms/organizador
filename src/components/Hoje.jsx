@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   getDateKey, getTodayReviews,
   updateTask as updateTaskDb, deleteTask as deleteTaskDb, dismissTask as dismissTaskDb, markTopicStudied, intervaloCepeda, updateTopic as updateTopicDb,
+  rotinaPrevista,
 } from '../store';
 import { Check, Clock, Trash2, ClipboardList, BookOpen, GripVertical, Pencil, Flame, Play, Shield, ChevronRight, CalendarClock, Loader2, MapPin } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -188,6 +189,24 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
     const m = {}; for (const t of state.tasks) m[t.date] = (m[t.date] || 0) + 1; return m;
   }, [state.tasks]);
 
+  // Previa da rotina para dias FUTUROS. A linha so nasce no proprio dia
+  // (ensureTodayRoutineTasks), entao sem isso quinta que vem aparecia vazia.
+  // Calculado, nunca gravado: mudou a rotina, a previa muda junto.
+  const previaPorData = useMemo(() => {
+    const m = {};
+    for (const d of dayStrip) {
+      const key = getDateKey(d);
+      if (key <= today) continue;
+      const jaTem = new Set(state.tasks.filter(t => t.date === key).map(t => t.title.toLowerCase()));
+      m[key] = rotinaPrevista(key, { homeRoutine: state.homeRoutine, customRooms: state.customRooms })
+        .filter(p => !jaTem.has(p.title.toLowerCase()));
+    }
+    return m;
+  }, [dayStrip, today, state.tasks, state.homeRoutine, state.customRooms]);
+
+  const previaDoDia = previaPorData[selectedDate] || [];
+  const previaMin = previaDoDia.reduce((soma, p) => soma + parseInt(p.effort || '30'), 0);
+
   const dayTasks = useMemo(() => {
     return state.tasks
       .filter(t => t.date === selectedDate)
@@ -333,7 +352,7 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
             const key = getDateKey(d);
             const sel = key === selectedDate;
             const isT = key === today;
-            const count = taskCountByDate[key] || 0;
+            const count = (taskCountByDate[key] || 0) + ((previaPorData[key] || []).length);
             return (
               <button key={key} onClick={() => setSelectedDate(key)} aria-pressed={sel}
                 aria-label={d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -390,7 +409,7 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
           <div className="w-14 h-14 rounded-2xl bg-[#18181b] border border-zinc-800 flex items-center justify-center mb-4">
             <ClipboardList size={24} className="text-zinc-700" aria-hidden="true" />
           </div>
-          <p className="text-sm font-medium text-zinc-500">{isToday ? 'Nenhuma tarefa para hoje' : 'Nenhuma tarefa nesse dia'}</p>
+          <p className="text-sm font-medium text-zinc-500">{isToday ? 'Nenhuma tarefa para hoje' : 'Nada marcado nesse dia'}</p>
           <p className="text-xs mt-1.5 text-zinc-700">Toque no + no topo pra adicionar</p>
         </div>
       ) : (
@@ -405,6 +424,34 @@ export default function Hoje({ state, updateState, userId, onEditTask, onFocusTa
             </ul>
           </SortableContext>
         </DndContext>
+      )}
+
+      {/* Previa da rotina em dias futuros. Nao e tarefa: e o que VAI nascer no
+          dia. Serve pra planejar a semana sem materializar linha que envelhece. */}
+      {previaDoDia.length > 0 && (
+        <section className="card !bg-[#141418] !border-zinc-800/70" aria-label="Previsao da rotina para este dia">
+          <div className="flex items-center gap-2.5 mb-3">
+            <CalendarClock size={15} className="text-zinc-600 shrink-0" aria-hidden="true" />
+            <p className="text-[12px] font-medium text-zinc-400">
+              Ja previsto pra esse dia
+              <span className="text-zinc-600 font-normal"> · {previaDoDia.length} {previaDoDia.length === 1 ? 'item' : 'itens'}
+                {previaMin > 0 && ` · ${previaMin >= 60 ? `${Math.floor(previaMin / 60)}h${previaMin % 60 ? ` ${previaMin % 60}m` : ''}` : `${previaMin}m`}`}</span>
+            </p>
+          </div>
+          <ul className="flex flex-col gap-1.5 list-none">
+            {previaDoDia.map(p => (
+              <li key={p.key} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#1a1a1f] border border-dashed border-zinc-800">
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-700 shrink-0" aria-hidden="true" />
+                <span className="text-[13px] text-zinc-400 flex-1 truncate">{p.title}</span>
+                {p.time && <span className="text-[11px] text-zinc-600 shrink-0">{p.time}</span>}
+                <span className="text-[11px] text-zinc-600 shrink-0">{p.effort}m</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-zinc-600 mt-3 leading-relaxed">
+            A rotina vira tarefa marcavel <b className="text-zinc-500">no proprio dia</b>. Aqui e so pra voce ver a carga antes de assumir mais coisa.
+          </p>
+        </section>
       )}
 
       {fechando && (

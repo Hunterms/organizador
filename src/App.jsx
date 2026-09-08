@@ -8,12 +8,13 @@ import Estudos from './components/Estudos';
 import Casa from './components/Casa';
 import Eventos from './components/Eventos';
 import Agua from './components/Agua';
+import Trabalho from './components/Trabalho';
 import Pomodoro from './components/Pomodoro';
 import AIPanel from './components/AIPanel';
 import {
   CalendarCheck, GraduationCap,
   Home, Droplets, Brain, Timer, Plus, X, LogOut, Loader2, ChevronRight,
-  Bell, BellRing, Smartphone, Moon
+  Bell, BellRing, Smartphone, Moon, Briefcase
 } from 'lucide-react';
 import { getPushState, enablePush, disablePush, needsHomeScreen, pushSupported } from './lib/push';
 import { supabase } from './lib/supabase';
@@ -21,6 +22,7 @@ import { supabase } from './lib/supabase';
 const tabs = [
   { id: 'hoje', label: 'Hoje', icon: CalendarCheck },
   { id: 'estudos', label: 'Estudos', icon: GraduationCap },
+  { id: 'trabalho', label: 'Trabalho', icon: Briefcase },
   { id: 'pomodoro', label: 'Pomodoro', icon: Timer },
   { id: 'agua', label: 'Agua', icon: Droplets },
 ];
@@ -294,12 +296,30 @@ function OrganizadorApp() {
     setShowAddTask(false);
   };
 
+  // Puxa o Azure agora e recarrega o estado. Chama a MESMA funcao do cron das
+  // 6:50 em vez de uma rota so pra tela: duas rotas fazendo o mesmo sync sao
+  // duas regras pra manter iguais, e elas nao ficam.
+  const syncTrabalho = useCallback(async () => {
+    if (!user) return;
+    try {
+      await supabase.functions.invoke('sync-azure', { body: { test: true } });
+    } catch (e) {
+      // Sync falhou (PAT vencido, Azure fora): ainda vale recarregar, porque o
+      // que ele mudou pelo detalhe ja esta gravado.
+      console.error('sync-azure falhou:', e);
+    }
+    const data = await fetchAllData(user.id);
+    setState(data);
+    saveCache(data);
+  }, [user]);
+
   const renderTab = () => {
     const p = { state, updateState, userId: user?.id };
     switch (activeTab) {
       case 'hoje': return <Hoje {...p} onAddTask={openAddTask} onEditTask={openEditTask} onGenerateRoutine={generateRoutine} onGenerateWeekPlan={generateWeekPlan} onFocusTask={focusTask} />;
       case 'estudos': return <Estudos {...p} />;
       case 'pomodoro': return <Pomodoro {...p} preselectKey={focusPreselect} onPreselectConsumed={() => setFocusPreselect(null)} />;
+      case 'trabalho': return <Trabalho {...p} onSync={syncTrabalho} />;
       case 'agua': return <Agua {...p} />;
     }
   };

@@ -27,3 +27,27 @@ export function caiHoje(cfg, dateKey) {
   // Modulo de negativo em JS volta negativo; datas antes do EPOCH existem.
   return ((semana % intervalo) + intervalo) % intervalo === (cfg.week_offset || 0) % intervalo;
 }
+
+/**
+ * O que a rotina PORIA num dia, sem gravar nada.
+ *
+ * Mora aqui, e nao no store, pela mesma razao do caiHoje: e logica pura e
+ * precisa ser testavel sem banco. `labelFor(key)` devolve o titulo ou null —
+ * chave orfa e pulada, igual ao dia real faz.
+ */
+export function rotinaPrevista(dateKey, homeRoutine, labelFor) {
+  const out = [];
+  for (const [key, cfg] of Object.entries(homeRoutine || {})) {
+    if (!caiHoje(cfg, dateKey)) continue;
+    const title = labelFor(key);
+    if (!title) continue;
+    out.push({
+      key, title,
+      category: cfg.category || 'casa',
+      effort: cfg.effort || '30',
+      time: cfg.time || '',
+      place: cfg.place || '',
+    });
+  }
+  return out;
+}
