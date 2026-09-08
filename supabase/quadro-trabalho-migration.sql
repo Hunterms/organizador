@@ -54,8 +54,16 @@ alter table public.kanban_cards add constraint kanban_cards_source_check
 
 -- Uma linha por work item por usuario. E a licao que a v1 do sync pagou caro:
 -- sem chave estavel, o mesmo item virava registro novo a cada rodada.
+--
+-- O INDICE NAO PODE SER PARCIAL. A primeira versao daqui tinha
+-- `where ado_id is not null`, que parece mais limpo e custou uma rodada inteira
+-- de sync: `ON CONFLICT (user_id, ado_id)` nao infere indice parcial sem repetir
+-- o predicado, e o PostgREST manda o on_conflict seco. Deu 42P10 em todo card,
+-- e o sync ainda apagou 6 cards como "sumiram do Azure", porque o erro pulou
+-- o item antes de ele entrar na lista dos vistos. Indice cheio nao custa nada:
+-- no Postgres NULL e distinto de NULL, entao os cards manuais convivem.
 create unique index if not exists kanban_ado_uniq
-  on public.kanban_cards(user_id, ado_id) where ado_id is not null;
+  on public.kanban_cards(user_id, ado_id);
 
 -- ---------------------------------------------------------------------------
 -- Uma vez: as tarefas que a v2 do sync criou em `tasks` viram cards do quadro.
