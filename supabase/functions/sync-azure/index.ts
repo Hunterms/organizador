@@ -70,14 +70,21 @@ const ado = (pat: string) => ({
  * o que esta na sprint corrente. Isso descarta tres coisas de uma vez: sprint
  * encerrada, sprint futura, e item na RAIZ do projeto (sem iteracao nenhuma).
  *
+ * v3.1 (08/09/2026): TAMBEM ACEITA A SPRINT QUE ACABOU DE FECHAR. Medido no dia
+ * da virada: a Sprint 20 do CPF Seguro fechou em 07/09 e a 21 abriu em 08/09,
+ * mas os 5 itens que ele estava tocando continuaram pendurados na 20. So a
+ * sprint corrente deixou o quadro com 1 card de 9 justamente no dia em que ele
+ * mais precisava dele. Quem reparenta e o time, e o time reparenta depois.
+ * Item esquecido em sprint velha nao acumula: sai sozinho na virada seguinte.
+ *
  * O que ele perde com isso, e ele sabe: 3 itens ativos que estao em
  * `CPF Seguro` sem sprint (#863 Revisao regulatorio do Pix, #3137 e #3138).
- * Se deveriam contar, o lugar de arrastar pra Sprint 20 e o Azure, nao aqui.
+ * Se deveriam contar, o lugar de arrastar pra uma sprint e o Azure, nao aqui.
  *
  * Comparacao por PATH, nunca por nome: "Sprint 1" do CPF Seguro fechou em
  * 08/2025 e "Sprint 1" do HDSC e a corrente.
  */
-async function iteracoesCorrentes(pat: string, projetos: string[]) {
+async function iteracoesAceitas(pat: string, projetos: string[]) {
   const atuais = new Set<string>();
   for (const proj of projetos) {
     try {
@@ -87,9 +94,20 @@ async function iteracoesCorrentes(pat: string, projetos: string[]) {
       );
       if (!r.ok) continue;
       const d = await r.json();
+      let ultimaPassada: { path: string; fim: string } | null = null;
       for (const it of d.value || []) {
-        if (it?.attributes?.timeFrame === "current" && it.path) atuais.add(it.path);
+        const a = it?.attributes || {};
+        if (!it.path) continue;
+        if (a.timeFrame === "current") atuais.add(it.path);
+        // A que fechou por ULTIMO, escolhida pela data e nao pela ordem da
+        // resposta: a ordem e cronologica hoje, mas nada na API promete isso.
+        if (a.timeFrame === "past" && a.finishDate) {
+          if (!ultimaPassada || a.finishDate > ultimaPassada.fim) {
+            ultimaPassada = { path: it.path, fim: a.finishDate };
+          }
+        }
       }
+      if (ultimaPassada) atuais.add(ultimaPassada.path);
     } catch { /* projeto sem time configurado: nao derruba o resto */ }
   }
   return atuais;
@@ -155,7 +173,7 @@ async function sincroniza() {
       const itens = ((await rd.json()).value || []) as { id: number; fields: Record<string, string> }[];
 
       const projetos = [...new Set(itens.map((i) => i.fields["System.TeamProject"]).filter(Boolean))];
-      const correntes = await iteracoesCorrentes(pat, projetos);
+      const correntes = await iteracoesAceitas(pat, projetos);
       const cacheEstados = new Map<string, string[]>();
 
       // Tarefas do dia que sync anterior criou. Sao consultadas pra decidir se a
