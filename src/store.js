@@ -3,7 +3,7 @@ import { getDateKey } from './lib/attendance';
 import { buildWeekPlan, tituloBloco, BLOCO_MIN, intervaloCepeda, blocosQueCabem } from './lib/weekPlan';
 export { intervaloCepeda };
 import { classDates } from './lib/attendance';
-import { caiHoje } from './lib/rotina';
+import { caiHoje, rotinaPrevista as previstaPura } from './lib/rotina';
 import { orcamentoMedido } from './lib/orcamento';
 import { preparoDeHoje } from './lib/eventos';
 
@@ -15,6 +15,7 @@ const defaultState = {
   subjects: [],
   eventos: [],
   kanban: { todo: [], doing: [], done: [] },
+  trabalho: [],
   water: {},
   homeRoutine: {},
   customRooms: [],
@@ -143,13 +144,25 @@ export async function fetchAllData(userId) {
     id: a.id, subjectId: a.subject_id, date: a.date, status: a.status,
   }));
 
-  // Kanban by column
+  // Kanban. As colunas nao sao mais tres fixas: card do Azure guarda o ESTADO
+  // real dele (New, Committed, In Progress...), que varia por tipo de work item.
+  // Agrupar aqui em todo/doing/done jogaria fora justamente o que o board mostra.
   const kanban = { todo: [], doing: [], done: [] };
+  const trabalho = [];
   (kanbanCards || []).forEach(c => {
-    if (kanban[c.column_name]) kanban[c.column_name].push({
+    const base = {
       id: c.id, title: c.title, project: c.project,
       priority: c.priority, effort: c.effort, createdAt: c.created_at,
-    });
+    };
+    if (c.source === 'azure') {
+      trabalho.push({
+        ...base, coluna: c.column_name, adoId: c.ado_id, tipo: c.ado_type,
+        url: c.ado_url, iteracao: c.iteration, blocked: c.blocked,
+        estados: c.states || [],
+      });
+    } else if (kanban[c.column_name]) {
+      kanban[c.column_name].push(base);
+    }
   });
 
   const studySessionsFormatted = (studySessions || []).map(s => ({
@@ -185,6 +198,7 @@ export async function fetchAllData(userId) {
       datas: e.datas || [], recorrencia: e.recorrencia || null, checklist: e.checklist || [],
     })),
     kanban,
+    trabalho,
     water,
     attendance: attendanceFormatted,
     homeRoutine: routineMap,
@@ -509,6 +523,21 @@ export async function ensureTodayRoutineTasks(userId, { tasks, homeRoutine, cust
   return created;
 }
 
+// Previsao da rotina para um dia, ja resolvendo o titulo dos comodos custom.
+//
+// POR QUE ISSO EXISTE
+// ensureTodayRoutineTasks so materializa HOJE. A faixa de dias do quadro vai de
+// -3 a +14, entao dava pra clicar em quinta que vem e ver um dia vazio — nao
+// havia nada la mesmo, porque a linha so nasce no dia.
+//
+// A saida NAO e materializar a semana toda: ele ja recebe ~19 tarefas/dia e
+// fecha ~1, e 7 dias de uma vez sao ~130 linhas que envelhecem mal (mudou a
+// rotina, as futuras ficam erradas). Aqui a lista e CALCULADA, do mesmo
+// home_routine e do mesmo caiHoje que o dia real usa. Zero escrita.
+export function rotinaPrevista(dateKey, { homeRoutine, customRooms }) {
+  return previstaPura(dateKey, homeRoutine, (k) => roomLabelFor(k, customRooms));
+}
+
 // ---- Eventos (CRUD minimo) -----------------------------------------------
 // O que muda com frequencia e a DATA (a gira do mes que vem). O checklist e
 // template: se assenta uma vez e fica. Por isso a tela edita data, e checklist
@@ -634,6 +663,26 @@ export async function createKanbanCard(userId, card) {
     id: data.id, title: card.title, project: card.project,
     priority: card.priority, effort: card.effort, createdAt: data.created_at,
   };
+}
+
+/**
+ * Fala com o Azure pela Edge Function `azure-item`.
+ *
+ * POR QUE PASSAR POR LA E NAO CHAMAR O AZURE DAQUI
+ * A chamada precisa do PAT dele, e um PAT com escopo de escrita cria e fecha
+ * work item em nome dele na organizacao inteira. Aqui e navegador: qualquer
+ * coisa que chegue neste arquivo esta a um DevTools de distancia. O segredo
+ * fica no servidor e o navegador so manda o JWT.
+ */
+export async function azureAction(action, payload = {}) {
+  const { data, error } = await supabase.functions.invoke('azure-item', {
+    body: { action, ...payload },
+  });
+  // O corpo de erro da funcao traz a mensagem util (escopo do PAT, campo que
+  // nao existe). `error` sozinho vira "non-2xx status", que nao ajuda ninguem.
+  if (data?.error) throw new Error(data.error);
+  if (error) throw error;
+  return data;
 }
 
 export async function moveKanbanCard(cardId, toColumn) {

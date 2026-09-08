@@ -54,3 +54,45 @@ const outro = { days: [6], interval_weeks: 12, week_offset: 6 };
 assert.ok(!sabados.some(d => caiHoje(trimestral, d) && caiHoje(outro, d)),
   'dois trimestrais com offset diferente nunca colidem');
 console.log('ok — bimestral e trimestral');
+
+// ---- rotinaPrevista -------------------------------------------------------
+// A previa usa exatamente o mesmo caiHoje do dia real, entao o que ela mostra
+// e o que vai nascer. Estes testes travam isso.
+{
+  const { rotinaPrevista } = await import('./rotina.js');
+  const label = (k) => ({ sala: 'Sala', cama: 'Cama', banheiro: 'Banheiro' })[k] || null;
+  const rotina = {
+    cama:     { days: [0,1,2,3,4,5,6], effort: '5' },
+    sala:     { days: [1], effort: '25', category: 'casa' },
+    banheiro: { days: [1], interval_weeks: 2, week_offset: 1, effort: '40' },
+    orfa:     { days: [1], effort: '30' },   // sem titulo: tem que sumir
+  };
+
+  // segunda da semana 0: cama + sala. banheiro e quinzenal com offset 1, nao cai.
+  const seg0 = rotinaPrevista(SEG, rotina, label).map(x => x.key).sort();
+  assert.deepEqual(seg0, ['cama', 'sala'], 'segunda da semana 0');
+
+  // segunda da semana 1: entra o banheiro
+  const seg1 = rotinaPrevista(SEG2, rotina, label).map(x => x.key).sort();
+  assert.deepEqual(seg1, ['banheiro', 'cama', 'sala'], 'segunda da semana 1');
+
+  // terca: so a cama, que e diaria
+  assert.deepEqual(rotinaPrevista(TER, rotina, label).map(x => x.key), ['cama']);
+
+  // chave orfa NUNCA aparece — foi o bug da tarefa sem titulo no quadro
+  assert.ok(!JSON.stringify(rotinaPrevista(SEG, rotina, label)).includes('orfa'));
+
+  // campos que a UI usa vem preenchidos, com o default certo
+  const sala = rotinaPrevista(SEG, rotina, label).find(x => x.key === 'sala');
+  assert.equal(sala.title, 'Sala');
+  assert.equal(sala.effort, '25');
+  assert.equal(sala.category, 'casa');
+  const cama = rotinaPrevista(SEG, rotina, label).find(x => x.key === 'cama');
+  assert.equal(cama.category, 'casa', 'category cai no default');
+
+  // rotina vazia nao quebra
+  assert.deepEqual(rotinaPrevista(SEG, {}, label), []);
+  assert.deepEqual(rotinaPrevista(SEG, null, label), []);
+}
+
+console.log('rotina.test.mjs: ok');
